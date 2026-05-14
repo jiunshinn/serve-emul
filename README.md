@@ -1,14 +1,10 @@
-
-
-https://github.com/user-attachments/assets/7dd6d57c-4270-4b13-a733-992b7085d944
-
 # serve-emu
 
 The `npx serve` of Android devices.
 
 Host your Android emulator (or real device) for use with agent tools like Codex, Cursor, or Claude Desktop — locally, over your LAN, or tunnel anywhere.
 
-<video src="https://github.com/jiunshinn/serve-emu/raw/main/demo.mov" controls></video>
+https://github.com/user-attachments/assets/7dd6d57c-4270-4b13-a733-992b7085d944
 
 ```sh
 bunx serve-emu
