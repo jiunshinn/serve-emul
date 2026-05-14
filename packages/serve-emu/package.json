@@ -37,5 +37,11 @@
     "start": "bun run src/cli.ts",
     "typecheck": "tsc --noEmit"
   },
-  "files": ["src", "scripts", "vendor", "README.md", "LICENSE"]
+  "files": [
+    "src",
+    "scripts",
+    "vendor",
+    "README.md",
+    "LICENSE"
+  ]
 }
