@@ -216,8 +216,13 @@ export async function startEmulator(opts: StartEmulatorOpts): Promise<EmulatorLa
   validateEmulatorPort(port);
 
   const args = [emulatorAvdArg(name), "-port", String(port)];
-  if (opts.cameraBack) args.push("-camera-back", opts.cameraBack);
-  if (opts.cameraFront) args.push("-camera-front", opts.cameraFront);
+  if (opts.cameraBack && opts.cameraFront) {
+    args.push("-camera-back", opts.cameraBack, "-camera-front", opts.cameraFront);
+  } else if (opts.cameraBack) {
+    args.push("-camera-back", opts.cameraBack, "-camera-front", "none");
+  } else if (opts.cameraFront) {
+    args.push("-camera-front", opts.cameraFront, "-camera-back", "none");
+  }
 
   const proc = spawn(emulator, args, { stdio: ["ignore", "inherit", "inherit"] });
   const spawnError = new Promise<never>((_, reject) => {

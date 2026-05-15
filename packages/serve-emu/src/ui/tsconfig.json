@@ -1,15 +1,17 @@
 {
   "compilerOptions": {
     "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "jsx": "react-jsx",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
     "noEmit": true,
-    "types": ["bun"]
+    "types": []
   },
-  "exclude": ["**/node_modules", "**/dist", "packages/*/src/ui"]
+  "include": ["**/*.ts", "**/*.tsx"]
 }

@@ -4,8 +4,9 @@ import { pickDevice } from "./adb.ts";
 import { listAvds, listRunningAvds, listWebcams, startEmulator } from "./emulator.ts";
 import { startServer } from "./server.ts";
 
+const argv = Bun.argv.slice(2);
 const { values } = parseArgs({
-  args: Bun.argv.slice(2),
+  args: argv,
   options: {
     port: { type: "string", short: "p", default: "3300" },
     serial: { type: "string", short: "s" },
@@ -26,12 +27,25 @@ const { values } = parseArgs({
   allowPositionals: true,
 });
 
+function hasOption(name: string): boolean {
+  const long = `--${name}`;
+  return argv.some((arg) => arg === long || arg.startsWith(`${long}=`));
+}
+
+function numberOption(name: string, fallback: number): number {
+  const value = values[name as keyof typeof values];
+  if (typeof value !== "string") return fallback;
+  const n = Number(value);
+  if (!Number.isFinite(n)) throw new Error(`--${name} must be a number.`);
+  return n;
+}
+
 if (values.help) {
   console.log(`serve-emu — host an Android device over scrcpy + WebSocket
 
 Usage:
   serve-emu [-p <port>] [-s <serial>] [--max-fps N] [--bit-rate N] [--max-size N]
-  serve-emu --avd <name> [--camera-back webcam0] [--camera-front webcam0] [--restart-avd]
+  serve-emu --avd <name> (--camera-back <webcam-id> | --camera-front <webcam-id>) [--restart-avd]
   serve-emu --avd-list
   serve-emu --running-avds
   serve-emu --webcam-list
@@ -39,15 +53,15 @@ Usage:
 Options:
   -p, --port <port>      Port to listen on (default: 3300)
   -s, --serial <serial>  adb device serial (defaults to the only booted device)
-      --max-fps <n>      Cap source frame rate (default: 60)
-      --bit-rate <bps>   H.264 bit rate (default: 8000000)
+      --max-fps <n>      Cap source frame rate (default: 60, or 30 with host camera)
+      --bit-rate <bps>   H.264 bit rate (default: 8000000, or 4000000 with host camera)
       --max-size <px>    Cap longest screen edge in pixels; 0 = native, but many
                          emulators reject native resolutions above ~2560 so this
-                         defaults to 1920 (set to 0 if you want full native).
+                         defaults to 1920, or 1280 with host camera.
       --avd <name>       Launch this Android Virtual Device before streaming
-      --camera-back <id> Map host camera to the emulator back camera
+      --camera-back <id> Map one host computer camera to the emulator back camera
       --camera-front <id>
-                         Map host camera to the emulator front camera
+                         Map one host computer camera to the emulator front camera
       --restart-avd      Stop a running matching AVD before launching it
       --avd-list         Print available Android Virtual Device names
       --running-avds     Print currently running emulator AVDs
@@ -91,6 +105,10 @@ async function main() {
     throw new Error("Use either --avd to launch an emulator or --serial to attach to an existing device, not both.");
   }
 
+  if (values["camera-back"] && values["camera-front"]) {
+    throw new Error("Use either --camera-back or --camera-front, not both. Map one host camera to one emulator camera facing.");
+  }
+
   let emulatorLaunch: Awaited<ReturnType<typeof startEmulator>> | null = null;
   const serial = values.avd
     ? (emulatorLaunch = await startEmulator({
@@ -103,12 +121,17 @@ async function main() {
       })).serial
     : pickDevice(values.serial);
   const port = Number(values.port);
+  const usesHostCamera = Boolean(values["camera-back"] || values["camera-front"]);
+  const maxFps = usesHostCamera && !hasOption("max-fps") ? 30 : numberOption("max-fps", 60);
+  const bitRate = usesHostCamera && !hasOption("bit-rate") ? 4_000_000 : numberOption("bit-rate", 8_000_000);
+  const maxSize = usesHostCamera && !hasOption("max-size") ? 1280 : numberOption("max-size", 1920);
+
   const { server, stop: stopServer } = await startServer({
     serial,
     port,
-    maxFps: Number(values["max-fps"]),
-    bitRate: Number(values["bit-rate"]),
-    maxSize: Number(values["max-size"]),
+    maxFps,
+    bitRate,
+    maxSize,
   }).catch((err) => {
     emulatorLaunch?.stop();
     throw err;
