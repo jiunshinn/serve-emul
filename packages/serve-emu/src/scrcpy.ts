@@ -41,6 +41,48 @@ function pickPort(): number {
   return 27200 + Math.floor(Math.random() * 2000);
 }
 
+function removeForward(serial: string, port: number): void {
+  const r = spawnSync("adb", ["-s", serial, "forward", "--remove", `tcp:${port}`], {
+    encoding: "utf8",
+  });
+  if (r.status !== 0 && !r.stderr.includes("cannot remove listener")) {
+    throw new Error(`adb -s ${serial} forward --remove tcp:${port} failed: ${r.stderr}`);
+  }
+}
+
+function forwardedPort(serial: string, target: string): number | null {
+  const r = spawnSync("adb", ["-s", serial, "forward", "--list"], { encoding: "utf8" });
+  if (r.status !== 0) return null;
+  for (const line of r.stdout.split("\n")) {
+    const match = line.match(/^(\S+)\s+tcp:(\d+)\s+(.+)$/);
+    if (!match) continue;
+    if (match[1] === serial && match[3] === target) return Number(match[2]);
+  }
+  return null;
+}
+
+function forwardAbstractSocket(serial: string, scid: string): number {
+  const target = `localabstract:scrcpy_${scid}`;
+  const dynamic = spawnSync("adb", ["-s", serial, "forward", "tcp:0", target], {
+    encoding: "utf8",
+  });
+  if (dynamic.status === 0) {
+    const port = Number(dynamic.stdout.trim()) || forwardedPort(serial, target);
+    if (port && Number.isInteger(port)) return port;
+  }
+
+  let lastError = dynamic.stderr.trim() || "adb did not return a forwarded port";
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const port = pickPort();
+    const fixed = spawnSync("adb", ["-s", serial, "forward", `tcp:${port}`, target], {
+      encoding: "utf8",
+    });
+    if (fixed.status === 0) return port;
+    lastError = fixed.stderr.trim() || lastError;
+  }
+  throw new Error(`Failed to create adb forward for ${target}: ${lastError}`);
+}
+
 function randomScid(): string {
   // scrcpy parses scid with Integer.parseInt(radix=16), which is a *signed*
   // 32-bit value, so the high bit must stay clear (max 0x7FFFFFFF).
@@ -78,6 +120,13 @@ class FramedReader {
     });
   }
 
+  prepend(data: Buffer): void {
+    if (data.length === 0) return;
+    this.chunks.unshift(data);
+    this.total += data.length;
+    this.flush();
+  }
+
   private flush() {
     while (this.waiters.length && this.total >= this.waiters[0].n) {
       const w = this.waiters.shift()!;
@@ -103,14 +152,20 @@ async function waitForAbstractSocket(serial: string, name: string, timeoutMs = 1
   throw new Error(`Timed out waiting for scrcpy abstract socket @${name}`);
 }
 
-async function connectOnce(port: number): Promise<Socket> {
+async function connectOnce(port: number, timeoutMs = 3_000): Promise<Socket> {
   return new Promise<Socket>((resolve, reject) => {
     const s = createConnection({ host: "127.0.0.1", port });
+    const timeout = setTimeout(() => {
+      s.destroy();
+      reject(new Error(`Timed out connecting to adb forward tcp:${port}`));
+    }, timeoutMs);
     const onError = (e: Error) => {
+      clearTimeout(timeout);
       s.removeListener("connect", onConnect);
       reject(e);
     };
     const onConnect = () => {
+      clearTimeout(timeout);
       s.removeListener("error", onError);
       resolve(s);
     };
@@ -125,6 +180,36 @@ const CODEC_NAMES: Record<number, string> = {
   0x00617631: "av1",
 };
 
+function parseVideoPreamble(buf: Buffer): {
+  deviceName: string;
+  codecName: string;
+  width: number;
+  height: number;
+  extra: Buffer;
+} {
+  for (const offset of [0, 1]) {
+    const codecMetaOffset = offset + 64;
+    if (codecMetaOffset + 12 > buf.length) continue;
+    const codecId = buf.readUInt32BE(codecMetaOffset);
+    const width = buf.readUInt32BE(codecMetaOffset + 4);
+    const height = buf.readUInt32BE(codecMetaOffset + 8);
+    const codecName = CODEC_NAMES[codecId];
+    if (!codecName || width < 1 || height < 1 || width > 16_384 || height > 16_384) continue;
+
+    const nameBuf = buf.subarray(offset, offset + 64);
+    const deviceName = nameBuf.toString("utf8").replace(/\0+$/, "");
+    return {
+      deviceName,
+      codecName,
+      width,
+      height,
+      extra: buf.subarray(codecMetaOffset + 12),
+    };
+  }
+
+  throw new Error(`Could not parse scrcpy video preamble: ${buf.toString("hex", 0, 24)}...`);
+}
+
 export async function startScrcpy(opts: StartOpts): Promise<ScrcpySession> {
   const jar = await ensureScrcpyServer();
   const { serial } = opts;
@@ -132,94 +217,105 @@ export async function startScrcpy(opts: StartOpts): Promise<ScrcpySession> {
   const bitRate = opts.bitRate ?? 8_000_000;
   const maxSize = opts.maxSize ?? 0;
   const scid = randomScid();
-  const localPort = pickPort();
-
-  adb(serial, ["push", jar, DEVICE_JAR_PATH]);
-  adb(serial, ["forward", `tcp:${localPort}`, `localabstract:scrcpy_${scid}`]);
-
-  const proc = spawn(
-    "adb",
-    [
-      "-s",
-      serial,
-      "shell",
-      `CLASSPATH=${DEVICE_JAR_PATH}`,
-      "app_process",
-      "/",
-      "com.genymobile.scrcpy.Server",
-      SCRCPY_VERSION,
-      `scid=${scid}`,
-      "log_level=info",
-      "audio=false",
-      "tunnel_forward=true",
-      "control=true",
-      "send_dummy_byte=true",
-      "send_codec_meta=true",
-      "send_frame_meta=true",
-      "send_device_meta=true",
-      `max_size=${maxSize}`,
-      `video_bit_rate=${bitRate}`,
-      `max_fps=${maxFps}`,
-      "cleanup=true",
-    ],
-    { stdio: ["ignore", "pipe", "pipe"] },
-  );
-  proc.stdout.on("data", (b: Buffer) => process.stdout.write(`[scrcpy] ${b}`));
-  proc.stderr.on("data", (b: Buffer) => process.stderr.write(`[scrcpy] ${b}`));
-
-  // Wait for the device-side abstract socket to appear before the host dials in;
-  // otherwise adb accepts the local connection, then closes it the moment the
-  // device-side connect fails, and the client sees a phantom EOF.
-  await waitForAbstractSocket(serial, `scrcpy_${scid}`);
-
-  // scrcpy in tunnel_forward mode waits for ALL configured sockets to be
-  // connected before it begins streaming. Open both, then read the video
-  // preamble.
-  const videoSock = await connectOnce(localPort);
-  const controlSock = await connectOnce(localPort);
-
-  // After dummy byte, scrcpy may push clipboard events on the control socket;
-  // drain them.
-  controlSock.on("data", () => {});
-
-  const reader = new FramedReader(videoSock);
-  // send_dummy_byte=true → 0x00
-  await reader.read(1);
-  // send_device_meta=true → 64-byte null-padded UTF-8 name
-  const nameBuf = await reader.read(64);
-  const deviceName = nameBuf.toString("utf8").replace(/\0+$/, "");
-  // send_codec_meta=true → codec_id (BE u32) + width (BE u32) + height (BE u32)
-  const codecMeta = await reader.read(12);
-  const codecId = codecMeta.readUInt32BE(0);
-  const width = codecMeta.readUInt32BE(4);
-  const height = codecMeta.readUInt32BE(8);
-  const codecName = CODEC_NAMES[codecId] ?? `0x${codecId.toString(16)}`;
+  let localPort: number | null = null;
+  let proc: ChildProcess | null = null;
+  let videoSock: Socket | null = null;
+  let controlSock: Socket | null = null;
+  let closed = false;
 
   const close = () => {
+    if (closed) return;
+    closed = true;
     try {
-      videoSock.destroy();
+      videoSock?.destroy();
     } catch {}
     try {
-      controlSock.destroy();
+      controlSock?.destroy();
     } catch {}
     try {
-      proc.kill("SIGKILL");
+      proc?.kill("SIGKILL");
     } catch {}
-    try {
-      adb(serial, ["forward", "--remove", `tcp:${localPort}`]);
-    } catch {}
+    if (localPort !== null) {
+      try {
+        removeForward(serial, localPort);
+      } catch {}
+    }
   };
 
-  return {
-    meta: { deviceName, codecId: codecName, width, height },
-    videoReader: reader,
-    controlSocket: controlSock,
-    proc,
-    scid,
-    localPort,
-    serial,
-    close,
-  };
+  try {
+    adb(serial, ["push", jar, DEVICE_JAR_PATH]);
+    localPort = forwardAbstractSocket(serial, scid);
+
+    proc = spawn(
+      "adb",
+      [
+        "-s",
+        serial,
+        "shell",
+        `CLASSPATH=${DEVICE_JAR_PATH}`,
+        "app_process",
+        "/",
+        "com.genymobile.scrcpy.Server",
+        SCRCPY_VERSION,
+        `scid=${scid}`,
+        "log_level=info",
+        "audio=false",
+        "tunnel_forward=true",
+        "control=true",
+        "send_dummy_byte=true",
+        "send_codec_meta=true",
+        "send_frame_meta=true",
+        "send_device_meta=true",
+        `max_size=${maxSize}`,
+        `video_bit_rate=${bitRate}`,
+        `max_fps=${maxFps}`,
+        "cleanup=true",
+      ],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    proc.stdout?.on("data", (b: Buffer) => process.stdout.write(`[scrcpy] ${b}`));
+    proc.stderr?.on("data", (b: Buffer) => process.stderr.write(`[scrcpy] ${b}`));
+
+    // Wait for the device-side abstract socket to appear before the host dials in;
+    // otherwise adb accepts the local connection, then closes it the moment the
+    // device-side connect fails, and the client sees a phantom EOF.
+    await waitForAbstractSocket(serial, `scrcpy_${scid}`);
+
+    // scrcpy in tunnel_forward mode waits for ALL configured sockets to be
+    // connected before it begins streaming. Open both, then read the video
+    // preamble.
+    videoSock = await connectOnce(localPort);
+    controlSock = await connectOnce(localPort);
+
+    // After dummy byte, scrcpy may push clipboard events on the control socket;
+    // drain them.
+    controlSock.on("data", () => {});
+
+    const reader = new FramedReader(videoSock);
+    // scrcpy variants disagree on whether the video socket includes the dummy
+    // byte, so detect the codec metadata alignment instead of blindly skipping.
+    const preamble = parseVideoPreamble(await reader.read(77));
+    reader.prepend(preamble.extra);
+
+    return {
+      meta: {
+        deviceName: preamble.deviceName,
+        codecId: preamble.codecName,
+        width: preamble.width,
+        height: preamble.height,
+      },
+      videoReader: reader,
+      controlSocket: controlSock,
+      proc,
+      scid,
+      localPort,
+      serial,
+      close,
+    };
+  } catch (err) {
+    close();
+    throw err;
+  }
 }
 
 /**

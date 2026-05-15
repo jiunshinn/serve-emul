@@ -37,12 +37,24 @@ Options:
 
 const serial = pickDevice(values.serial);
 const port = Number(values.port);
-const { server } = await startServer({
+const { server, stop: stopServer } = await startServer({
   serial,
   port,
   maxFps: Number(values["max-fps"]),
   bitRate: Number(values["bit-rate"]),
   maxSize: Number(values["max-size"]),
+});
+
+const stop = () => {
+  stopServer();
+};
+process.once("SIGINT", () => {
+  stop();
+  process.exit(0);
+});
+process.once("SIGTERM", () => {
+  stop();
+  process.exit(0);
 });
 
 console.log(`serve-emu → http://localhost:${server.port}  (device: ${serial})`);

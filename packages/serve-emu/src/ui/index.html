@@ -53,7 +53,7 @@
         max-height: 80vh;
         max-width: 90vw;
         height: auto;
-        cursor: crosshair;
+        cursor: default;
         user-select: none;
         touch-action: none;
       }
@@ -100,12 +100,14 @@
       const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
 
       let ws;
-      let down = null;
       let deviceSize = { width: 0, height: 0 };
       let fpsCount = 0;
       let fpsTimer = performance.now();
       let lastFps = 0;
       let statusStr = "connecting…";
+      let reconnectDelayMs = 500;
+      const canDecodeVideo =
+        "VideoDecoder" in globalThis && "EncodedVideoChunk" in globalThis;
 
       function setStatus(s) {
         statusStr = s;
@@ -135,6 +137,10 @@
       }
 
       function ensureDecoder(spsBytes) {
+        if (!canDecodeVideo) {
+          setStatus("WebCodecs unsupported");
+          return;
+        }
         if (decoder && decoder.state !== "closed") return;
         const codec = buildCodecString(spsBytes);
         decoder = new VideoDecoder({
@@ -213,18 +219,29 @@
 
       // ---- WebSocket ----
       function connect() {
-        ws = new WebSocket(`ws://${location.host}/ws`);
+        if (!canDecodeVideo) {
+          setStatus("WebCodecs unsupported");
+          return;
+        }
+        const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+        ws = new WebSocket(`${protocol}//${location.host}/ws`);
         ws.binaryType = "arraybuffer";
-        ws.onopen = () => setStatus("streaming");
+        ws.onopen = () => {
+          reconnectDelayMs = 500;
+          setStatus("streaming");
+        };
+        ws.onerror = () => setStatus("connection error");
         ws.onclose = () => {
-          setStatus("disconnected — retrying…");
+          const retryIn = reconnectDelayMs;
+          setStatus(`disconnected — retrying in ${Math.round(retryIn / 1000)}s`);
           try {
             decoder?.close();
           } catch {}
           decoder = null;
           frameIdx = 0;
           sawKeyframe = false;
-          setTimeout(connect, 500);
+          reconnectDelayMs = Math.min(Math.round(reconnectDelayMs * 1.6), 5000);
+          setTimeout(connect, retryIn);
         };
         ws.onmessage = (e) => {
           if (typeof e.data === "string") return; // input ack, ignore
@@ -237,40 +254,84 @@
         .then((r) => r.json())
         .then((d) => {
           deviceSize = d.size;
+          if (d.status && d.status !== "streaming") setStatus(d.status);
           render();
-        });
+        })
+        .catch(() => setStatus("metadata unavailable"));
 
       // ---- Input ----
-      function send(msg) {
-        if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
+      let activePointer = null;
+      let pendingMove = null;
+      let moveRaf = 0;
+
+      function send(msg, ack = true) {
+        if (ws && ws.readyState === 1) {
+          ws.send(JSON.stringify(ack ? msg : { ...msg, ack: false }));
+        }
+      }
+      function clamp01(n) {
+        return Math.min(1, Math.max(0, n));
       }
       function norm(e) {
         const r = canvas.getBoundingClientRect();
-        return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+        return {
+          x: clamp01((e.clientX - r.left) / r.width),
+          y: clamp01((e.clientY - r.top) / r.height),
+        };
+      }
+      function sendTouch(action, point, pointerId) {
+        send({ type: "touch", action, x: point.x, y: point.y, pointerId }, false);
+      }
+      function flushMove() {
+        moveRaf = 0;
+        if (!activePointer || !pendingMove) return;
+        const next = pendingMove;
+        pendingMove = null;
+        activePointer.x = next.x;
+        activePointer.y = next.y;
+        sendTouch("move", next, activePointer.id);
+      }
+      function queueMove(point) {
+        pendingMove = point;
+        if (!moveRaf) moveRaf = requestAnimationFrame(flushMove);
+      }
+      function stopPointer(e) {
+        if (!activePointer || e.pointerId !== activePointer.id) return;
+        e.preventDefault();
+        if (moveRaf) {
+          cancelAnimationFrame(moveRaf);
+          flushMove();
+        }
+        const up = norm(e);
+        sendTouch("up", up, activePointer.id);
+        try {
+          canvas.releasePointerCapture(activePointer.id);
+        } catch {}
+        activePointer = null;
+        pendingMove = null;
       }
       canvas.addEventListener("pointerdown", (e) => {
+        if (e.pointerType === "mouse" && e.button !== 0) return;
+        if (activePointer) return;
+        e.preventDefault();
         canvas.setPointerCapture(e.pointerId);
-        down = { ...norm(e), t: performance.now() };
+        const point = norm(e);
+        activePointer = { id: e.pointerId, ...point };
+        pendingMove = null;
+        sendTouch("down", point, e.pointerId);
+      });
+      canvas.addEventListener("pointermove", (e) => {
+        if (!activePointer || e.pointerId !== activePointer.id) return;
+        e.preventDefault();
+        const events =
+          typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : [e];
+        queueMove(norm(events[events.length - 1] || e));
       });
       canvas.addEventListener("pointerup", (e) => {
-        if (!down) return;
-        const up = norm(e);
-        const dx = up.x - down.x;
-        const dy = up.y - down.y;
-        if (Math.hypot(dx, dy) < 0.01) {
-          send({ type: "tap", x: up.x, y: up.y });
-        } else {
-          send({
-            type: "swipe",
-            x1: down.x,
-            y1: down.y,
-            x2: up.x,
-            y2: up.y,
-            durationMs: Math.max(100, performance.now() - down.t),
-          });
-        }
-        down = null;
+        stopPointer(e);
       });
+      canvas.addEventListener("pointercancel", stopPointer);
+      canvas.addEventListener("contextmenu", (e) => e.preventDefault());
       document.querySelectorAll("footer button").forEach((btn) => {
         btn.addEventListener("click", () => send({ type: btn.dataset.key }));
       });
