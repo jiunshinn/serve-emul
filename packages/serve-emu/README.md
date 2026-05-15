@@ -20,11 +20,12 @@ v1. Working:
 - Text injection, keyevents
 - Multi-client (multiple browser tabs share one stream)
 - Auto-replay of SPS/PPS to clients joining mid-stream
+- Optional AVD launch with one host computer webcam mapped to one emulator camera facing
 
 Planned:
 
 - Logcat forwarding over SSE
-- Camera injection (Camera2/CameraX hook)
+- Camera injection beyond emulator startup camera mapping
 - Multi-device routing
 - Embeddable Connect-style middleware (`serve-emu/middleware`)
 - Compiled single binary
@@ -33,7 +34,7 @@ Planned:
 
 - Node.js 18+ or Bun 1.1+
 - `adb` on PATH (Android platform-tools)
-- A booted device or emulator (`adb devices` shows it)
+- A booted device/emulator (`adb devices` shows it), or an AVD name passed with `--avd`
 - Chrome / Edge / Safari 16.4+ (for WebCodecs)
 
 ## Quick start
@@ -47,19 +48,58 @@ bun run packages/serve-emu/src/cli.ts
 
 The `setup` step is also run lazily on first start, so you can skip it.
 
+## Host camera
+
+For Android Emulator targets, `serve-emu` can launch the AVD with one host computer webcam mapped to one emulator camera facing. Camera mapping must be configured when the emulator starts. The opposite facing is disabled so Android apps do not fall back to the emulator's fake or virtual-scene camera.
+
+```sh
+# 1. Find an AVD name available on this machine.
+bun run packages/serve-emu/src/cli.ts --avd-list
+
+# 2. Find a host webcam id reported by Android Emulator.
+bun run packages/serve-emu/src/cli.ts --webcam-list
+
+# 3. Pick one facing, not both. Use exact values from the two commands above.
+bun run packages/serve-emu/src/cli.ts --avd <avd-name> --camera-back <webcam-id> --restart-avd
+
+# Or, if the Android app opens the front camera:
+bun run packages/serve-emu/src/cli.ts --avd <avd-name> --camera-front <webcam-id> --restart-avd
+```
+
+If macOS prompts for camera permission, grant it to the terminal or IDE process that launched `serve-emu`.
+
+Use only one of `--camera-back <webcam-id>` or `--camera-front <webcam-id>`. `serve-emu` disables the other facing by passing `none` to Android Emulator. If an app requires a specific facing, map the host webcam to that facing.
+
+If the emulator log still says `Initialized camera with name: environment`, the AVD is not running with the updated camera flags. Stop the running AVD and start again with `--restart-avd`.
+
+Host webcam mapping is heavier than the emulator's fake camera scene. When `--camera-back` or `--camera-front` is used, `serve-emu` lowers the default stream load to `--max-fps 30`, `--max-size 1280`, and `--bit-rate 4000000` unless you pass those flags explicitly.
+
 ## CLI
 
 ```
 serve-emu [-p <port>] [-s <serial>] [--max-fps N] [--bit-rate N] [--max-size N]
+serve-emu --avd <name> (--camera-back <webcam-id> | --camera-front <webcam-id>) [--restart-avd]
+serve-emu --avd-list
+serve-emu --running-avds
+serve-emu --webcam-list
 ```
 
 | flag | default | meaning |
 |---|---|---|
 | `-p, --port` | `3300` | HTTP port for the preview server |
 | `-s, --serial` | auto | adb device serial (only required when multiple devices are attached) |
-| `--max-fps` | `60` | cap source frame rate |
-| `--bit-rate` | `8000000` | H.264 bit rate in bps |
-| `--max-size` | `1920` | downscale longest edge to N pixels; `0` = native (encoders on many emulators reject above ~2560, so the default trims) |
+| `--max-fps` | `60` (`30` with host camera) | cap source frame rate |
+| `--bit-rate` | `8000000` (`4000000` with host camera) | H.264 bit rate in bps |
+| `--max-size` | `1920` (`1280` with host camera) | downscale longest edge to N pixels; `0` = native (encoders on many emulators reject above ~2560, so the default trims) |
+| `--avd` | none | launch this Android Virtual Device before streaming |
+| `--camera-back` | none | map one host computer webcam id from `--webcam-list` to the emulator back camera |
+| `--camera-front` | none | map one host computer webcam id from `--webcam-list` to the emulator front camera |
+| `--restart-avd` | false | stop a running matching AVD before launching it, useful because camera mapping only applies at emulator startup |
+| `--avd-list` | false | list available Android Virtual Device names |
+| `--running-avds` | false | list currently running emulator serials and AVD names |
+| `--webcam-list` | false | list host webcam ids reported by Android Emulator |
+| `--emulator` | auto | Android Emulator binary path; defaults to PATH or Android SDK env vars |
+| `--emulator-port` | auto | emulator console port for `--avd`; must be an even port from 5554 through 5682 |
 
 ## How it works
 

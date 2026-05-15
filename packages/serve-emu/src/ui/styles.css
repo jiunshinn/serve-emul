@@ -1,0 +1,71 @@
+:root {
+  color-scheme: dark;
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+}
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: #0b0b0e;
+  color: #e5e5ea;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+header {
+  padding: 12px 16px;
+  border-bottom: 1px solid #1f1f24;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+header h1 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+  letter-spacing: 0.02em;
+}
+header .meta {
+  font-size: 12px;
+  color: #8a8a93;
+  font-variant-numeric: tabular-nums;
+}
+main {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.device {
+  position: relative;
+  background: #000;
+  border-radius: 24px;
+  overflow: hidden;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+}
+canvas {
+  display: block;
+  max-height: 80vh;
+  max-width: 90vw;
+  height: auto;
+  cursor: default;
+  user-select: none;
+  touch-action: none;
+}
+footer {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid #1f1f24;
+  justify-content: center;
+}
+button {
+  background: #1c1c22;
+  color: #e5e5ea;
+  border: 1px solid #2a2a32;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+button:hover {
+  background: #25252d;
+}

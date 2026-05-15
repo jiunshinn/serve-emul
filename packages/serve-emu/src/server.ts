@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type { ServerWebSocket } from "bun";
@@ -6,6 +5,7 @@ import { startScrcpy, readFrame, type ScrcpySession } from "./scrcpy.ts";
 import { dispatch, parseGesture, resetVideoPacket, type Screen } from "./input.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const UI_DIR = join(__dirname, "..", "dist", "ui");
 
 export type ServerOpts = {
   serial: string;
@@ -25,11 +25,13 @@ type Client = {
   sentFrames: number;
   droppedFrames: number;
   backpressureEvents: number;
+  awaitingKeyFrame: boolean;
 };
 
 const MAX_WS_MESSAGE_BYTES = 16 * 1024;
-const DROP_FRAME_BUFFERED_BYTES = 4 * 1024 * 1024;
+const DROP_FRAME_BUFFERED_BYTES = 512 * 1024;
 const CLOSE_CLIENT_BUFFERED_BYTES = 16 * 1024 * 1024;
+const VIDEO_RESET_COOLDOWN_MS = 250;
 
 export async function startServer(opts: ServerOpts) {
   const session = await startScrcpy({
@@ -102,7 +104,37 @@ export async function startServer(opts: ServerOpts) {
     return (value as Record<string, unknown>).ack !== false;
   };
 
-  const sendFrame = (client: Client, data: Buffer) => {
+  const isResetVideoRequest = (value: unknown) =>
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    (value as Record<string, unknown>).type === "reset-video";
+
+  let lastVideoResetAt = 0;
+  const requestVideoReset = () => {
+    const now = Date.now();
+    if (now - lastVideoResetAt < VIDEO_RESET_COOLDOWN_MS) return;
+    lastVideoResetAt = now;
+    session.controlSocket.write(resetVideoPacket());
+  };
+
+  const dropUntilKeyFrame = (client: Client) => {
+    client.droppedFrames++;
+    totalDroppedFrames++;
+    client.awaitingKeyFrame = true;
+    requestVideoReset();
+  };
+
+  const sendFrame = (client: Client, data: Buffer, isKeyFrame: boolean) => {
+    if (client.awaitingKeyFrame) {
+      if (!isKeyFrame) {
+        client.droppedFrames++;
+        totalDroppedFrames++;
+        return;
+      }
+      client.awaitingKeyFrame = false;
+    }
+
     const buffered = client.ws.getBufferedAmount();
     if (buffered > CLOSE_CLIENT_BUFFERED_BYTES) {
       clients.delete(client);
@@ -112,14 +144,14 @@ export async function startServer(opts: ServerOpts) {
       return;
     }
     if (buffered > DROP_FRAME_BUFFERED_BYTES) {
-      client.droppedFrames++;
-      totalDroppedFrames++;
+      dropUntilKeyFrame(client);
       return;
     }
     const sent = client.ws.send(data);
     if (sent === -1) {
       client.backpressureEvents++;
       totalBackpressureEvents++;
+      dropUntilKeyFrame(client);
       return;
     }
     if (sent === 0) {
@@ -149,7 +181,7 @@ export async function startServer(opts: ServerOpts) {
         frameCount++;
         lastFrameAt = new Date().toISOString();
         const out = f.isKey && cachedConfig ? Buffer.concat([cachedConfig, f.data]) : f.data;
-        for (const c of clients) sendFrame(c, out);
+        for (const c of clients) sendFrame(c, out, f.isKey);
       }
     } catch (err) {
       if (!stopRequested) markTerminal("error", String(err));
@@ -200,11 +232,10 @@ export async function startServer(opts: ServerOpts) {
         return new Response("upgrade failed", { status: 400 });
       }
 
-      if (url.pathname === "/" || url.pathname === "/index.html") {
-        const html = await readFile(join(__dirname, "ui", "index.html"), "utf8");
-        return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
-      }
-
+      const reqPath = url.pathname === "/" ? "/index.html" : url.pathname;
+      if (reqPath.includes("..")) return new Response("not found", { status: 404 });
+      const file = Bun.file(join(UI_DIR, reqPath));
+      if (await file.exists()) return new Response(file);
       return new Response("not found", { status: 404 });
     },
     websocket: {
@@ -215,13 +246,14 @@ export async function startServer(opts: ServerOpts) {
           sentFrames: 0,
           droppedFrames: 0,
           backpressureEvents: 0,
+          awaitingKeyFrame: true,
         };
         clients.add(handle);
         ws.data.handle = handle;
         // Force scrcpy to emit a fresh keyframe so this client can start
         // decoding immediately (default GOP is 10s). cachedConfig will be
         // bundled into that keyframe automatically.
-        if (status === "streaming") session.controlSocket.write(resetVideoPacket());
+        if (status === "streaming") requestVideoReset();
       },
       message(ws, raw) {
         if (typeof raw !== "string") return;
@@ -233,6 +265,11 @@ export async function startServer(opts: ServerOpts) {
           if (status !== "streaming") throw new Error(`session is ${status}`);
           const payload = JSON.parse(raw);
           const acknowledge = wantsAck(payload);
+          if (isResetVideoRequest(payload)) {
+            requestVideoReset();
+            if (acknowledge) sendJson(ws, { ok: true });
+            return;
+          }
           const msg = parseGesture(payload);
           void dispatch(session.controlSocket, msg, screen)
             .then(() => {

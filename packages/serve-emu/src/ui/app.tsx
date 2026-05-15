@@ -1,0 +1,46 @@
+import { useCallback, useEffect, useRef } from "react";
+import { StatusBar } from "./components/status-bar";
+import { DeviceStream } from "./components/device-stream";
+import { ControlBar, type HardwareKey } from "./components/control-bar";
+import { useStream } from "./lib/use-stream";
+
+export function App() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const { state, send } = useStream(canvasRef);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target !== document.body) return;
+      if (e.key === "Escape") {
+        send({ type: "back" });
+        return;
+      }
+      if (e.key === "Enter") {
+        send({ type: "key", keycode: 66 });
+        return;
+      }
+      if (e.key.length === 1) {
+        send({ type: "text", text: e.key });
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [send]);
+
+  const onPress = useCallback(
+    (key: HardwareKey) => send({ type: key }),
+    [send],
+  );
+
+  return (
+    <>
+      <StatusBar status={state.status} deviceSize={state.deviceSize} fps={state.fps} />
+      <main>
+        <div className="device">
+          <DeviceStream canvasRef={canvasRef} send={send} />
+        </div>
+      </main>
+      <ControlBar onPress={onPress} />
+    </>
+  );
+}
