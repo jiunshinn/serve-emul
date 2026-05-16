@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type { ServerWebSocket } from "bun";
-import { startScrcpy, readFrame, type ScrcpySession } from "./scrcpy.ts";
+import { startScrcpy, type ScrcpySession } from "./scrcpy.ts";
 import { dispatch, parseGesture, resetVideoPacket, type Screen } from "./input.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -13,15 +13,17 @@ export type ServerOpts = {
   maxFps?: number;
   bitRate?: number;
   maxSize?: number;
+  keyFrameInterval?: number;
 };
 
 type SessionStatus = "streaming" | "stopped" | "error";
 
-type WsData = { id: number; handle?: Client };
+type WsData = { id: number; frameMeta: boolean; handle?: Client };
 
 type Client = {
   id: number;
   ws: ServerWebSocket<WsData>;
+  frameMeta: boolean;
   sentFrames: number;
   droppedFrames: number;
   backpressureEvents: number;
@@ -31,14 +33,20 @@ type Client = {
 const MAX_WS_MESSAGE_BYTES = 16 * 1024;
 const DROP_FRAME_BUFFERED_BYTES = 512 * 1024;
 const CLOSE_CLIENT_BUFFERED_BYTES = 16 * 1024 * 1024;
-const VIDEO_RESET_COOLDOWN_MS = 250;
+const FRAME_META_MAGIC = 0x53454d55; // "SEMU"
+const FRAME_META_VERSION = 1;
+const FRAME_META_HEADER_BYTES = 16;
+const FRAME_FLAG_KEY = 1 << 0;
+const VIDEO_RESET_COOLDOWN_MS = 1500;
+const STALE_VIDEO_RESET_MS = 2500;
 
 export async function startServer(opts: ServerOpts) {
-  const session = await startScrcpy({
+  const session: ScrcpySession = await startScrcpy({
     serial: opts.serial,
     maxFps: opts.maxFps,
     bitRate: opts.bitRate,
     maxSize: opts.maxSize,
+    keyFrameInterval: opts.keyFrameInterval,
   });
   console.log(
     `scrcpy ready: ${session.meta.deviceName} • ${session.meta.codecId} • ${session.meta.width}×${session.meta.height}`,
@@ -56,6 +64,13 @@ export async function startServer(opts: ServerOpts) {
   let lastFrameAt: string | null = null;
   let totalDroppedFrames = 0;
   let totalBackpressureEvents = 0;
+  let sourceFps = 0;
+  let lastFpsFrameCount = 0;
+  let videoResetRequests = 0;
+  let lastVideoResetAt: string | null = null;
+  let lastVideoResetReason: string | null = null;
+  let lastVideoResetMs = 0;
+  let watchdog: ReturnType<typeof setInterval> | null = null;
 
   const health = () => ({
     ok: status === "streaming",
@@ -66,9 +81,22 @@ export async function startServer(opts: ServerOpts) {
     size: { width: session.meta.width, height: session.meta.height },
     clients: clients.size,
     frames: frameCount,
+    sourceFps,
     configPackets: configPacketCount,
     droppedFrames: totalDroppedFrames,
     backpressureEvents: totalBackpressureEvents,
+    videoResetRequests,
+    lastVideoResetAt,
+    lastVideoResetReason,
+    clientsDetail: Array.from(clients, (client) => ({
+      id: client.id,
+      frameMeta: client.frameMeta,
+      sentFrames: client.sentFrames,
+      droppedFrames: client.droppedFrames,
+      backpressureEvents: client.backpressureEvents,
+      bufferedBytes: client.ws.getBufferedAmount(),
+      awaitingKeyFrame: client.awaitingKeyFrame,
+    })),
     startedAt,
     stoppedAt,
     lastFrameAt,
@@ -89,6 +117,7 @@ export async function startServer(opts: ServerOpts) {
     status = nextStatus;
     lastError = reason;
     stoppedAt = new Date().toISOString();
+    if (watchdog) clearInterval(watchdog);
     session.close();
     closeClients(nextStatus === "error" ? 1011 : 1000, reason);
   };
@@ -97,6 +126,28 @@ export async function startServer(opts: ServerOpts) {
     try {
       ws.send(JSON.stringify(value));
     } catch {}
+  };
+
+  const withFrameMeta = (
+    data: Buffer,
+    frame: { pts: bigint; isKey: boolean },
+  ): Buffer => {
+    const out = Buffer.allocUnsafe(FRAME_META_HEADER_BYTES + data.length);
+    out.writeUInt32BE(FRAME_META_MAGIC, 0);
+    out.writeUInt8(FRAME_META_VERSION, 4);
+    out.writeUInt8(frame.isKey ? FRAME_FLAG_KEY : 0, 5);
+    out.writeUInt16BE(0, 6);
+    out.writeBigUInt64BE(frame.pts, 8);
+    data.copy(out, FRAME_META_HEADER_BYTES);
+    return out;
+  };
+
+  const makeKeyframeAU = (frameData: Buffer): Buffer => {
+    if (!cachedConfig) return frameData;
+    const out = Buffer.allocUnsafe(cachedConfig.length + frameData.length);
+    cachedConfig.copy(out, 0);
+    frameData.copy(out, cachedConfig.length);
+    return out;
   };
 
   const wantsAck = (value: unknown) => {
@@ -110,19 +161,23 @@ export async function startServer(opts: ServerOpts) {
     !Array.isArray(value) &&
     (value as Record<string, unknown>).type === "reset-video";
 
-  let lastVideoResetAt = 0;
-  const requestVideoReset = () => {
+  const requestVideoReset = (reason: string) => {
     const now = Date.now();
-    if (now - lastVideoResetAt < VIDEO_RESET_COOLDOWN_MS) return;
-    lastVideoResetAt = now;
-    session.controlSocket.write(resetVideoPacket());
+    if (now - lastVideoResetMs < VIDEO_RESET_COOLDOWN_MS) return;
+    lastVideoResetMs = now;
+    videoResetRequests++;
+    lastVideoResetAt = new Date(now).toISOString();
+    lastVideoResetReason = reason;
+    try {
+      session.controlSocket.write(resetVideoPacket());
+    } catch {}
   };
 
   const dropUntilKeyFrame = (client: Client) => {
     client.droppedFrames++;
     totalDroppedFrames++;
     client.awaitingKeyFrame = true;
-    requestVideoReset();
+    requestVideoReset("client backpressure");
   };
 
   const sendFrame = (client: Client, data: Buffer, isKeyFrame: boolean) => {
@@ -168,7 +223,7 @@ export async function startServer(opts: ServerOpts) {
   (async () => {
     try {
       while (!stopRequested) {
-        const f = await readFrame(session.videoReader);
+        const f = await session.readFrame();
         if (!f) {
           if (!stopRequested) markTerminal("error", "scrcpy video stream ended");
           break;
@@ -180,13 +235,34 @@ export async function startServer(opts: ServerOpts) {
         }
         frameCount++;
         lastFrameAt = new Date().toISOString();
-        const out = f.isKey && cachedConfig ? Buffer.concat([cachedConfig, f.data]) : f.data;
-        for (const c of clients) sendFrame(c, out, f.isKey);
+        const rawOut = f.isKey && cachedConfig ? makeKeyframeAU(f.data) : f.data;
+        let framedOut: Buffer | null = null;
+        for (const c of clients) {
+          if (c.awaitingKeyFrame && !f.isKey) {
+            c.droppedFrames++;
+            totalDroppedFrames++;
+            continue;
+          }
+          const out = c.frameMeta
+            ? (framedOut ??= withFrameMeta(rawOut, f))
+            : rawOut;
+          sendFrame(c, out, f.isKey);
+        }
       }
     } catch (err) {
       if (!stopRequested) markTerminal("error", String(err));
     }
   })();
+
+  watchdog = setInterval(() => {
+    sourceFps = frameCount - lastFpsFrameCount;
+    lastFpsFrameCount = frameCount;
+    if (status !== "streaming" || clients.size === 0) return;
+    const lastFrameMs = lastFrameAt ? Date.parse(lastFrameAt) : Date.parse(startedAt);
+    if (Date.now() - lastFrameMs > STALE_VIDEO_RESET_MS) {
+      requestVideoReset("source stream stalled");
+    }
+  }, 1000);
 
   session.proc.once("exit", (code, signal) => {
     if (!stopRequested && status === "streaming") {
@@ -227,7 +303,8 @@ export async function startServer(opts: ServerOpts) {
             headers: { "Content-Type": "application/json; charset=utf-8" },
           });
         }
-        const ok = srv.upgrade(req, { data: { id: nextId++ } });
+        const frameMeta = url.searchParams.get("frame-meta") === "1";
+        const ok = srv.upgrade(req, { data: { id: nextId++, frameMeta } });
         if (ok) return undefined as unknown as Response;
         return new Response("upgrade failed", { status: 400 });
       }
@@ -243,6 +320,7 @@ export async function startServer(opts: ServerOpts) {
         const handle: Client = {
           id: ws.data.id,
           ws,
+          frameMeta: ws.data.frameMeta,
           sentFrames: 0,
           droppedFrames: 0,
           backpressureEvents: 0,
@@ -250,10 +328,7 @@ export async function startServer(opts: ServerOpts) {
         };
         clients.add(handle);
         ws.data.handle = handle;
-        // Force scrcpy to emit a fresh keyframe so this client can start
-        // decoding immediately (default GOP is 10s). cachedConfig will be
-        // bundled into that keyframe automatically.
-        if (status === "streaming") requestVideoReset();
+        requestVideoReset("client opened");
       },
       message(ws, raw) {
         if (typeof raw !== "string") return;
@@ -266,7 +341,7 @@ export async function startServer(opts: ServerOpts) {
           const payload = JSON.parse(raw);
           const acknowledge = wantsAck(payload);
           if (isResetVideoRequest(payload)) {
-            requestVideoReset();
+            requestVideoReset("client requested keyframe");
             if (acknowledge) sendJson(ws, { ok: true });
             return;
           }
@@ -294,6 +369,7 @@ export async function startServer(opts: ServerOpts) {
       stoppedAt = new Date().toISOString();
     }
     closeClients(1001, "server stopping");
+    if (watchdog) clearInterval(watchdog);
     server.stop(true);
     session.close();
   };

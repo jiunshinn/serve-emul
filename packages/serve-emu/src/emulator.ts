@@ -21,8 +21,6 @@ export type StartEmulatorOpts = {
   avd: string;
   emulatorPath?: string;
   port?: number;
-  cameraBack?: string;
-  cameraFront?: string;
   restartAvd?: boolean;
   bootTimeoutMs?: number;
 };
@@ -52,15 +50,6 @@ export function resolveEmulator(explicit?: string): string {
   throw new Error(
     "Could not find Android Emulator. Put `emulator` on PATH or set ANDROID_HOME / ANDROID_SDK_ROOT.",
   );
-}
-
-export function listWebcams(emulatorPath?: string): string {
-  const emulator = resolveEmulator(emulatorPath);
-  const r = spawnSync(emulator, ["-webcam-list"], { encoding: "utf8" });
-  if (r.status !== 0) {
-    throw new Error(`emulator -webcam-list failed: ${r.stderr || r.stdout}`);
-  }
-  return r.stdout.trimEnd();
 }
 
 function listAvdsWithEmulator(emulator: string): string[] {
@@ -201,11 +190,6 @@ export async function startEmulator(opts: StartEmulatorOpts): Promise<EmulatorLa
   const running = findRunningAvd(name);
   if (running) {
     if (!opts.restartAvd) {
-      if (opts.cameraBack || opts.cameraFront) {
-        throw new Error(
-          `AVD "${name}" is already running as ${running.serial}. Camera mapping only applies when the emulator starts; stop it first or pass --restart-avd.`,
-        );
-      }
       return { serial: running.serial, proc: null, ownsProcess: false, stop: () => {} };
     }
     killEmulator(running.serial);
@@ -216,13 +200,6 @@ export async function startEmulator(opts: StartEmulatorOpts): Promise<EmulatorLa
   validateEmulatorPort(port);
 
   const args = [emulatorAvdArg(name), "-port", String(port)];
-  if (opts.cameraBack && opts.cameraFront) {
-    args.push("-camera-back", opts.cameraBack, "-camera-front", opts.cameraFront);
-  } else if (opts.cameraBack) {
-    args.push("-camera-back", opts.cameraBack, "-camera-front", "none");
-  } else if (opts.cameraFront) {
-    args.push("-camera-front", opts.cameraFront, "-camera-back", "none");
-  }
 
   const proc = spawn(emulator, args, { stdio: ["ignore", "inherit", "inherit"] });
   const spawnError = new Promise<never>((_, reject) => {

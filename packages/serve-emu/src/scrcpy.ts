@@ -13,6 +13,7 @@ export type ScrcpyMeta = {
 };
 
 export type ScrcpySession = {
+  transport: "scrcpy";
   meta: ScrcpyMeta;
   videoReader: FramedReader;
   controlSocket: Socket;
@@ -20,6 +21,7 @@ export type ScrcpySession = {
   scid: string;
   localPort: number;
   serial: string;
+  readFrame: () => Promise<VideoFrame | null>;
   close: () => void;
 };
 
@@ -28,6 +30,14 @@ export type StartOpts = {
   maxFps?: number;
   bitRate?: number;
   maxSize?: number;
+  keyFrameInterval?: number;
+};
+
+export type VideoFrame = {
+  data: Buffer;
+  pts: bigint;
+  isConfig: boolean;
+  isKey: boolean;
 };
 
 function adb(serial: string, args: string[]) {
@@ -91,14 +101,24 @@ function randomScid(): string {
     .padStart(8, "0");
 }
 
+const MAX_READER_BUFFER_BYTES = 32 * 1024 * 1024;
+
 class FramedReader {
   private chunks: Buffer[] = [];
+  private firstChunkOffset = 0;
   private total = 0;
   private waiters: { n: number; resolve: (b: Buffer) => void; reject: (e: Error) => void }[] = [];
   private err: Error | null = null;
 
   constructor(public readonly sock: Socket) {
     sock.on("data", (d: Buffer) => {
+      if (this.total + d.length > MAX_READER_BUFFER_BYTES) {
+        this.err = new Error("scrcpy video reader buffer overflow");
+        while (this.waiters.length) this.waiters.shift()!.reject(this.err);
+        this.chunks.length = 0;
+        this.total = 0;
+        return;
+      }
       this.chunks.push(d);
       this.total += d.length;
       this.flush();
@@ -122,25 +142,56 @@ class FramedReader {
 
   prepend(data: Buffer): void {
     if (data.length === 0) return;
+    if (this.firstChunkOffset > 0 && this.chunks.length > 0) {
+      this.chunks[0] = this.chunks[0].subarray(this.firstChunkOffset);
+      this.firstChunkOffset = 0;
+    }
     this.chunks.unshift(data);
     this.total += data.length;
     this.flush();
   }
 
+  private consume(n: number): Buffer {
+    const first = this.chunks[0];
+    const firstAvailable = first.length - this.firstChunkOffset;
+    if (firstAvailable >= n) {
+      const out = first.subarray(this.firstChunkOffset, this.firstChunkOffset + n);
+      this.firstChunkOffset += n;
+      this.total -= n;
+      if (this.firstChunkOffset === first.length) {
+        this.chunks.shift();
+        this.firstChunkOffset = 0;
+      }
+      return out;
+    }
+
+    const out = Buffer.allocUnsafe(n);
+    let written = 0;
+    while (written < n) {
+      const chunk = this.chunks[0];
+      const available = chunk.length - this.firstChunkOffset;
+      const take = Math.min(n - written, available);
+      chunk.copy(out, written, this.firstChunkOffset, this.firstChunkOffset + take);
+      written += take;
+      this.firstChunkOffset += take;
+      this.total -= take;
+      if (this.firstChunkOffset === chunk.length) {
+        this.chunks.shift();
+        this.firstChunkOffset = 0;
+      }
+    }
+    return out;
+  }
+
   private flush() {
     while (this.waiters.length && this.total >= this.waiters[0].n) {
       const w = this.waiters.shift()!;
-      const merged = this.chunks.length === 1 ? this.chunks[0] : Buffer.concat(this.chunks);
-      const out = merged.subarray(0, w.n);
-      const rest = merged.subarray(w.n);
-      this.chunks = rest.length > 0 ? [rest] : [];
-      this.total = rest.length;
-      w.resolve(out);
+      w.resolve(this.consume(w.n));
     }
   }
 }
 
-async function waitForAbstractSocket(serial: string, name: string, timeoutMs = 10_000) {
+async function waitForAbstractSocket(serial: string, name: string, timeoutMs = 30_000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const r = spawnSync("adb", ["-s", serial, "shell", "cat", "/proc/net/unix"], {
@@ -216,6 +267,7 @@ export async function startScrcpy(opts: StartOpts): Promise<ScrcpySession> {
   const maxFps = opts.maxFps ?? 60;
   const bitRate = opts.bitRate ?? 8_000_000;
   const maxSize = opts.maxSize ?? 0;
+  const keyFrameInterval = opts.keyFrameInterval ?? 1;
   const scid = randomScid();
   let localPort: number | null = null;
   let proc: ChildProcess | null = null;
@@ -269,6 +321,7 @@ export async function startScrcpy(opts: StartOpts): Promise<ScrcpySession> {
         `max_size=${maxSize}`,
         `video_bit_rate=${bitRate}`,
         `max_fps=${maxFps}`,
+        ...(keyFrameInterval > 0 ? [`video_codec_options=i-frame-interval=${keyFrameInterval}`] : []),
         "cleanup=true",
       ],
       { stdio: ["ignore", "pipe", "pipe"] },
@@ -298,6 +351,7 @@ export async function startScrcpy(opts: StartOpts): Promise<ScrcpySession> {
     reader.prepend(preamble.extra);
 
     return {
+      transport: "scrcpy",
       meta: {
         deviceName: preamble.deviceName,
         codecId: preamble.codecName,
@@ -310,6 +364,7 @@ export async function startScrcpy(opts: StartOpts): Promise<ScrcpySession> {
       scid,
       localPort,
       serial,
+      readFrame: () => readFrame(reader),
       close,
     };
   } catch (err) {
@@ -328,7 +383,7 @@ const PACKET_FLAGS = PACKET_FLAG_CONFIG | PACKET_FLAG_KEY_FRAME;
 
 export async function readFrame(
   reader: FramedReader,
-): Promise<{ data: Buffer; pts: bigint; isConfig: boolean; isKey: boolean } | null> {
+): Promise<VideoFrame | null> {
   try {
     const header = await reader.read(12);
     const ptsRaw = header.readBigUInt64BE(0);
