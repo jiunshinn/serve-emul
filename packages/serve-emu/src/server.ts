@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import type { ServerWebSocket } from "bun";
 import { startScrcpy, type ScrcpySession } from "./scrcpy.ts";
 import { dispatch, parseGesture, resetVideoPacket, type Screen } from "./input.ts";
+import { parseGeoFix, setEmulatorLocation, type GeoFix } from "./location.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UI_DIR = join(__dirname, "..", "dist", "ui");
@@ -39,6 +40,7 @@ const FRAME_META_HEADER_BYTES = 16;
 const FRAME_FLAG_KEY = 1 << 0;
 const VIDEO_RESET_COOLDOWN_MS = 1500;
 const STALE_VIDEO_RESET_MS = 2500;
+const MAX_JSON_BODY_BYTES = 8 * 1024;
 
 export async function startServer(opts: ServerOpts) {
   const session: ScrcpySession = await startScrcpy({
@@ -71,6 +73,7 @@ export async function startServer(opts: ServerOpts) {
   let lastVideoResetReason: string | null = null;
   let lastVideoResetMs = 0;
   let watchdog: ReturnType<typeof setInterval> | null = null;
+  let lastLocation: (GeoFix & { appliedAt: string }) | null = null;
 
   const health = () => ({
     ok: status === "streaming",
@@ -88,6 +91,7 @@ export async function startServer(opts: ServerOpts) {
     videoResetRequests,
     lastVideoResetAt,
     lastVideoResetReason,
+    location: lastLocation,
     clientsDetail: Array.from(clients, (client) => ({
       id: client.id,
       frameMeta: client.frameMeta,
@@ -160,6 +164,12 @@ export async function startServer(opts: ServerOpts) {
     value !== null &&
     !Array.isArray(value) &&
     (value as Record<string, unknown>).type === "reset-video";
+
+  const readJsonBody = async (req: Request): Promise<unknown> => {
+    const contentLength = Number(req.headers.get("content-length") ?? "0");
+    if (contentLength > MAX_JSON_BODY_BYTES) throw new Error("request body too large");
+    return req.json();
+  };
 
   const requestVideoReset = (reason: string) => {
     const now = Date.now();
@@ -294,6 +304,30 @@ export async function startServer(opts: ServerOpts) {
 
       if (url.pathname === "/health") {
         return Response.json(health(), { status: status === "streaming" ? 200 : 503 });
+      }
+
+      if (url.pathname === "/api/location") {
+        if (req.method === "GET") {
+          return Response.json({
+            serial: opts.serial,
+            emulator: /^emulator-\d+$/.test(opts.serial),
+            location: lastLocation,
+          });
+        }
+        if (req.method === "POST") {
+          try {
+            const fix = parseGeoFix(await readJsonBody(req));
+            setEmulatorLocation(opts.serial, fix);
+            lastLocation = { ...fix, appliedAt: new Date().toISOString() };
+            return Response.json({ ok: true, location: lastLocation });
+          } catch (err) {
+            return Response.json(
+              { ok: false, error: err instanceof Error ? err.message : String(err) },
+              { status: 400 },
+            );
+          }
+        }
+        return new Response("method not allowed", { status: 405 });
       }
 
       if (url.pathname === "/ws") {

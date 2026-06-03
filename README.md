@@ -22,6 +22,7 @@ v1. Working:
 - Text injection, keyevents
 - Multi-client (multiple browser tabs share one stream)
 - Auto-replay of SPS/PPS to clients joining mid-stream
+- Emulator GPS location control from the browser UI and `POST /api/location`
 
 Planned:
 
@@ -71,6 +72,18 @@ serve-emu --running-avds
 | `--running-avds` | false | list currently running emulator serials and AVD names |
 | `--emulator` | auto | Android Emulator binary path; defaults to PATH or Android SDK env vars |
 | `--emulator-port` | auto | emulator console port for `--avd`; must be an even port from 5554 through 5682 |
+
+## HTTP API
+
+Set an Android Emulator GPS fix:
+
+```sh
+curl -X POST http://localhost:3300/api/location \
+  -H 'Content-Type: application/json' \
+  -d '{"latitude":37.5665,"longitude":126.978}'
+```
+
+Location control uses the Android Emulator `geo fix` command and is currently emulator-only.
 
 ## How it works
 
