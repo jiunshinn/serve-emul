@@ -83,6 +83,15 @@ input {
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
+input[type="file"] {
+  color: #b8b8c0;
+  padding: 7px;
+}
+input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: #f2f2f7;
+}
 .location-panel {
   align-self: stretch;
   min-height: 0;
@@ -161,6 +170,22 @@ input {
   border-radius: 2px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
 }
+.route-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.route-overlay polyline {
+  fill: none;
+  stroke: #1f8bff;
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  paint-order: stroke;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7));
+}
 .map-attribution {
   position: absolute;
   right: 6px;
@@ -198,6 +223,30 @@ input {
 }
 .primary-action:hover {
   background: #ffffff;
+}
+.route-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid #1f1f24;
+  padding-top: 12px;
+}
+.route-meta {
+  color: #9a9aa3;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #d8d8de;
+  font-size: 13px;
+}
+.route-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
 }
 @media (max-width: 920px) {
   body {

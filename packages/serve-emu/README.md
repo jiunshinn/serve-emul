@@ -83,6 +83,22 @@ curl -X POST http://localhost:3300/api/location \
 
 Location control uses the Android Emulator `geo fix` command and is currently emulator-only.
 
+Start route playback from waypoints:
+
+```sh
+curl -X POST http://localhost:3300/api/route \
+  -H 'Content-Type: application/json' \
+  -d '{"speedKph":30,"multiplier":1,"loop":false,"waypoints":[{"latitude":37.5665,"longitude":126.978},{"latitude":37.5651,"longitude":126.98955}]}'
+```
+
+Pause, resume, or stop playback:
+
+```sh
+curl -X POST http://localhost:3300/api/route/control \
+  -H 'Content-Type: application/json' \
+  -d '{"action":"pause"}'
+```
+
 ## How it works
 
 ```

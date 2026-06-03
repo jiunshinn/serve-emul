@@ -4,6 +4,7 @@ import type { ServerWebSocket } from "bun";
 import { startScrcpy, type ScrcpySession } from "./scrcpy.ts";
 import { dispatch, parseGesture, resetVideoPacket, type Screen } from "./input.ts";
 import { parseGeoFix, setEmulatorLocation, type GeoFix } from "./location.ts";
+import { parseRoutePlaybackRequest, RoutePlayback } from "./route-playback.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UI_DIR = join(__dirname, "..", "dist", "ui");
@@ -41,6 +42,7 @@ const FRAME_FLAG_KEY = 1 << 0;
 const VIDEO_RESET_COOLDOWN_MS = 1500;
 const STALE_VIDEO_RESET_MS = 2500;
 const MAX_JSON_BODY_BYTES = 8 * 1024;
+const MAX_ROUTE_BODY_BYTES = 2 * 1024 * 1024;
 
 export async function startServer(opts: ServerOpts) {
   const session: ScrcpySession = await startScrcpy({
@@ -74,6 +76,12 @@ export async function startServer(opts: ServerOpts) {
   let lastVideoResetMs = 0;
   let watchdog: ReturnType<typeof setInterval> | null = null;
   let lastLocation: (GeoFix & { appliedAt: string }) | null = null;
+  const routePlayback = new RoutePlayback({
+    applyLocation: (fix) => setEmulatorLocation(opts.serial, fix),
+    onLocation: (fix) => {
+      lastLocation = fix;
+    },
+  });
 
   const health = () => ({
     ok: status === "streaming",
@@ -92,6 +100,7 @@ export async function startServer(opts: ServerOpts) {
     lastVideoResetAt,
     lastVideoResetReason,
     location: lastLocation,
+    route: routePlayback.snapshot(),
     clientsDetail: Array.from(clients, (client) => ({
       id: client.id,
       frameMeta: client.frameMeta,
@@ -122,6 +131,7 @@ export async function startServer(opts: ServerOpts) {
     lastError = reason;
     stoppedAt = new Date().toISOString();
     if (watchdog) clearInterval(watchdog);
+    routePlayback.close();
     session.close();
     closeClients(nextStatus === "error" ? 1011 : 1000, reason);
   };
@@ -165,9 +175,9 @@ export async function startServer(opts: ServerOpts) {
     !Array.isArray(value) &&
     (value as Record<string, unknown>).type === "reset-video";
 
-  const readJsonBody = async (req: Request): Promise<unknown> => {
+  const readJsonBody = async (req: Request, maxBytes = MAX_JSON_BODY_BYTES): Promise<unknown> => {
     const contentLength = Number(req.headers.get("content-length") ?? "0");
-    if (contentLength > MAX_JSON_BODY_BYTES) throw new Error("request body too large");
+    if (contentLength > maxBytes) throw new Error("request body too large");
     return req.json();
   };
 
@@ -316,6 +326,7 @@ export async function startServer(opts: ServerOpts) {
         }
         if (req.method === "POST") {
           try {
+            routePlayback.stop();
             const fix = parseGeoFix(await readJsonBody(req));
             setEmulatorLocation(opts.serial, fix);
             lastLocation = { ...fix, appliedAt: new Date().toISOString() };
@@ -328,6 +339,47 @@ export async function startServer(opts: ServerOpts) {
           }
         }
         return new Response("method not allowed", { status: 405 });
+      }
+
+      if (url.pathname === "/api/route") {
+        if (req.method === "GET") {
+          return Response.json(routePlayback.snapshot());
+        }
+        if (req.method === "POST") {
+          try {
+            const route = parseRoutePlaybackRequest(await readJsonBody(req, MAX_ROUTE_BODY_BYTES));
+            return Response.json({ ok: true, route: routePlayback.start(route) });
+          } catch (err) {
+            return Response.json(
+              { ok: false, error: err instanceof Error ? err.message : String(err) },
+              { status: 400 },
+            );
+          }
+        }
+        if (req.method === "DELETE") {
+          return Response.json({ ok: true, route: routePlayback.stop() });
+        }
+        return new Response("method not allowed", { status: 405 });
+      }
+
+      if (url.pathname === "/api/route/control") {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+        try {
+          const payload = await readJsonBody(req);
+          if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+            throw new Error("control payload must be an object");
+          }
+          const action = (payload as Record<string, unknown>).action;
+          if (action === "pause") return Response.json({ ok: true, route: routePlayback.pause() });
+          if (action === "resume") return Response.json({ ok: true, route: routePlayback.resume() });
+          if (action === "stop") return Response.json({ ok: true, route: routePlayback.stop() });
+          throw new Error("action must be pause, resume, or stop");
+        } catch (err) {
+          return Response.json(
+            { ok: false, error: err instanceof Error ? err.message : String(err) },
+            { status: 400 },
+          );
+        }
       }
 
       if (url.pathname === "/ws") {
@@ -404,6 +456,7 @@ export async function startServer(opts: ServerOpts) {
     }
     closeClients(1001, "server stopping");
     if (watchdog) clearInterval(watchdog);
+    routePlayback.close();
     server.stop(true);
     session.close();
   };

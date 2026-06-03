@@ -2,8 +2,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent } from "react";
 
 type Point = { x: number; y: number };
-type LocationPoint = { latitude: number; longitude: number };
+type LocationPoint = { latitude: number; longitude: number; altitude?: number };
 type Tile = { key: string; x: number; y: number; left: number; top: number; wrappedX: number };
+type RouteSnapshot = {
+  status: "idle" | "running" | "paused" | "completed" | "error";
+  waypointCount: number;
+  totalMeters: number;
+  progressMeters: number;
+  speedKph: number;
+  multiplier: number;
+  loop: boolean;
+  lastError: string | null;
+  currentLocation: (LocationPoint & { appliedAt: string }) | null;
+};
 
 const TILE_SIZE = 256;
 const MIN_ZOOM = 2;
@@ -62,8 +73,108 @@ function tileUrl(tile: Tile, zoom: number): string {
   return `https://tile.openstreetmap.org/${zoom}/${tile.wrappedX}/${tile.y}.png`;
 }
 
+function waypointFromRecord(value: unknown): LocationPoint | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const latitude = Number(record.latitude ?? record.lat);
+  const longitude = Number(record.longitude ?? record.lng ?? record.lon);
+  const altitudeRaw = record.altitude ?? record.alt ?? record.ele;
+  const altitude = altitudeRaw === undefined || altitudeRaw === null ? undefined : Number(altitudeRaw);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
+  if (altitude !== undefined && !Number.isFinite(altitude)) return null;
+  return {
+    latitude,
+    longitude,
+    ...(altitude === undefined ? {} : { altitude }),
+  };
+}
+
+function waypointsFromCoordinates(coordinates: unknown): LocationPoint[] {
+  if (!Array.isArray(coordinates)) return [];
+  if (coordinates.length >= 2 && typeof coordinates[0] === "number" && typeof coordinates[1] === "number") {
+    const longitude = coordinates[0];
+    const latitude = coordinates[1];
+    const altitude = typeof coordinates[2] === "number" ? coordinates[2] : undefined;
+    return latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180
+      ? [{ latitude, longitude, ...(altitude === undefined ? {} : { altitude }) }]
+      : [];
+  }
+  return coordinates.flatMap(waypointsFromCoordinates);
+}
+
+function waypointsFromGeoJson(value: unknown): LocationPoint[] {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return [];
+  const record = value as Record<string, unknown>;
+  if (record.type === "FeatureCollection" && Array.isArray(record.features)) {
+    return record.features.flatMap(waypointsFromGeoJson);
+  }
+  if (record.type === "Feature") return waypointsFromGeoJson(record.geometry);
+  if (record.coordinates) return waypointsFromCoordinates(record.coordinates);
+  return [];
+}
+
+function parseJsonWaypoints(text: string): LocationPoint[] {
+  const parsed = JSON.parse(text) as unknown;
+  if (Array.isArray(parsed)) {
+    const fromArray = parsed.map(waypointFromRecord).filter((p): p is LocationPoint => Boolean(p));
+    if (fromArray.length > 0) return fromArray;
+  }
+  if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+    const waypoints = (parsed as Record<string, unknown>).waypoints;
+    if (Array.isArray(waypoints)) {
+      const fromWaypoints = waypoints.map(waypointFromRecord).filter((p): p is LocationPoint => Boolean(p));
+      if (fromWaypoints.length > 0) return fromWaypoints;
+    }
+  }
+  const fromGeoJson = waypointsFromGeoJson(parsed);
+  if (fromGeoJson.length > 0) return fromGeoJson;
+  throw new Error("JSON must be a waypoint array or GeoJSON route");
+}
+
+function parseXmlWaypoints(text: string, kind: "gpx" | "kml"): LocationPoint[] {
+  const doc = new DOMParser().parseFromString(text, "application/xml");
+  if (doc.querySelector("parsererror")) throw new Error(`${kind.toUpperCase()} parse failed`);
+  if (kind === "gpx") {
+    const nodes = Array.from(doc.querySelectorAll("trkpt, rtept, wpt"));
+    return nodes.flatMap((node) => {
+      const latitude = Number(node.getAttribute("lat"));
+      const longitude = Number(node.getAttribute("lon"));
+      const ele = node.querySelector("ele")?.textContent;
+      const altitude = ele ? Number(ele) : undefined;
+      return waypointFromRecord({ latitude, longitude, altitude }) ?? [];
+    });
+  }
+  return Array.from(doc.querySelectorAll("coordinates")).flatMap((node) =>
+    (node.textContent ?? "")
+      .trim()
+      .split(/\s+/)
+      .flatMap((tuple) => {
+        const [longitude, latitude, altitude] = tuple.split(",").map(Number);
+        return waypointFromRecord({ latitude, longitude, altitude }) ?? [];
+      }),
+  );
+}
+
+function parseRouteText(text: string, fileName: string): LocationPoint[] {
+  const lower = fileName.toLowerCase();
+  const trimmed = text.trim();
+  if (lower.endsWith(".gpx") || (trimmed.startsWith("<") && trimmed.includes("<gpx"))) {
+    return parseXmlWaypoints(text, "gpx");
+  }
+  if (lower.endsWith(".kml") || (trimmed.startsWith("<") && trimmed.includes("<kml"))) {
+    return parseXmlWaypoints(text, "kml");
+  }
+  return parseJsonWaypoints(text);
+}
+
+function formatDistance(meters: number): string {
+  return meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${Math.round(meters)} m`;
+}
+
 export function LocationPanel() {
   const mapRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const dragRef = useRef<{ start: Point; center: Point; moved: boolean } | null>(null);
   const [size, setSize] = useState(DEFAULT_SIZE);
   const [zoom, setZoom] = useState(12);
@@ -72,6 +183,11 @@ export function LocationPanel() {
   const [latText, setLatText] = useState(formatCoord(DEFAULT_LOCATION.latitude));
   const [lngText, setLngText] = useState(formatCoord(DEFAULT_LOCATION.longitude));
   const [status, setStatus] = useState("Ready");
+  const [routePoints, setRoutePoints] = useState<LocationPoint[]>([]);
+  const [routeStatus, setRouteStatus] = useState<RouteSnapshot | null>(null);
+  const [speedKph, setSpeedKph] = useState("30");
+  const [multiplier, setMultiplier] = useState("1");
+  const [loop, setLoop] = useState(false);
 
   const syncDraft = useCallback((next: LocationPoint, recenter = false) => {
     const normalized = {
@@ -107,6 +223,27 @@ export function LocationPanel() {
         if (data.location) syncDraft(data.location, true);
       })
       .catch(() => {});
+  }, [syncDraft]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const syncRoute = () => {
+      fetch("/api/route")
+        .then((r) => r.json() as Promise<RouteSnapshot>)
+        .then((route) => {
+          if (cancelled) return;
+          setRouteStatus(route);
+          if (route.currentLocation) syncDraft(route.currentLocation, route.status === "running");
+          if (route.lastError) setStatus(route.lastError);
+        })
+        .catch(() => {});
+    };
+    syncRoute();
+    const timer = setInterval(syncRoute, 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, [syncDraft]);
 
   const centerPixel = useMemo(() => project(center, zoom), [center, zoom]);
@@ -151,6 +288,20 @@ export function LocationPanel() {
 
   const markerLeft = draftPixel.x - centerPixel.x + size.width / 2;
   const markerTop = draftPixel.y - centerPixel.y + size.height / 2;
+  const routePolyline = useMemo(
+    () =>
+      routePoints
+        .map((point) => {
+          const p = project(point, zoom);
+          return `${p.x - centerPixel.x + size.width / 2},${p.y - centerPixel.y + size.height / 2}`;
+        })
+        .join(" "),
+    [centerPixel.x, centerPixel.y, routePoints, size.height, size.width, zoom],
+  );
+  const progress =
+    routeStatus && routeStatus.totalMeters > 0
+      ? Math.min(100, Math.round((routeStatus.progressMeters / routeStatus.totalMeters) * 100))
+      : 0;
 
   const applyLocation = async (location = draft) => {
     setStatus("Setting...");
@@ -185,6 +336,74 @@ export function LocationPanel() {
     const next = { latitude, longitude };
     syncDraft(next, true);
     void applyLocation(next);
+  };
+
+  const readRouteFile = async (file: File) => {
+    setStatus("Loading route...");
+    try {
+      const points = parseRouteText(await file.text(), file.name);
+      if (points.length < 1) throw new Error("route file has no waypoints");
+      setRoutePoints(points.slice(0, 10_000));
+      syncDraft(points[0], true);
+      setStatus(`Loaded ${points.length} waypoints`);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const startRoute = async () => {
+    if (routePoints.length < 1) {
+      setStatus("Load a route first");
+      return;
+    }
+    const speed = Number(speedKph);
+    const rate = Number(multiplier);
+    if (!Number.isFinite(speed) || speed <= 0) {
+      setStatus("Speed must be positive");
+      return;
+    }
+    if (!Number.isFinite(rate) || rate <= 0) {
+      setStatus("Rate must be positive");
+      return;
+    }
+    setStatus("Starting route...");
+    try {
+      const res = await fetch("/api/route", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          waypoints: routePoints,
+          speedKph: speed,
+          multiplier: rate,
+          intervalMs: 1000,
+          loop,
+        }),
+      });
+      const data = (await res.json()) as { ok?: boolean; error?: string; route?: RouteSnapshot };
+      if (!res.ok || !data.ok || !data.route) throw new Error(data.error || "route start failed");
+      setRouteStatus(data.route);
+      setStatus("Route running");
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const controlRoute = async (action: "pause" | "resume" | "stop") => {
+    try {
+      const res = await fetch("/api/route/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const data = (await res.json()) as { ok?: boolean; error?: string; route?: RouteSnapshot };
+      if (!res.ok || !data.ok || !data.route) throw new Error(data.error || "route control failed");
+      setRouteStatus(data.route);
+      setStatus(action === "stop" ? "Route stopped" : `Route ${data.route.status}`);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err));
+    }
   };
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
@@ -247,6 +466,11 @@ export function LocationPanel() {
             }}
           />
         ))}
+        {routePolyline && (
+          <svg className="route-overlay" viewBox={`0 0 ${size.width} ${size.height}`}>
+            <polyline points={routePolyline} />
+          </svg>
+        )}
         <div
           className="map-marker"
           style={{
@@ -293,6 +517,68 @@ export function LocationPanel() {
       <button className="primary-action" onClick={applyText}>
         Set Location
       </button>
+      <section className="route-panel">
+        <div className="panel-heading">
+          <h2>Route</h2>
+          <div className="location-status">{routeStatus?.status ?? "idle"} {progress}%</div>
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".gpx,.geojson,.json,.kml,application/json,application/geo+json"
+          onChange={(e) => {
+            const file = e.currentTarget.files?.[0];
+            if (file) void readRouteFile(file);
+          }}
+        />
+        <div className="route-meta">
+          {routePoints.length} pts
+          {routeStatus ? ` • ${formatDistance(routeStatus.progressMeters)} / ${formatDistance(routeStatus.totalMeters)}` : ""}
+        </div>
+        <div className="coordinate-grid">
+          <label>
+            km/h
+            <input
+              inputMode="decimal"
+              onChange={(e) => setSpeedKph(e.currentTarget.value)}
+              value={speedKph}
+            />
+          </label>
+          <label>
+            Rate
+            <input
+              inputMode="decimal"
+              onChange={(e) => setMultiplier(e.currentTarget.value)}
+              value={multiplier}
+            />
+          </label>
+        </div>
+        <label className="toggle-row">
+          <input
+            checked={loop}
+            onChange={(e) => setLoop(e.currentTarget.checked)}
+            type="checkbox"
+          />
+          Loop
+        </label>
+        <div className="route-actions">
+          <button onClick={startRoute}>Play</button>
+          <button
+            onClick={() => {
+              void controlRoute(routeStatus?.status === "paused" ? "resume" : "pause");
+            }}
+          >
+            {routeStatus?.status === "paused" ? "Resume" : "Pause"}
+          </button>
+          <button
+            onClick={() => {
+              void controlRoute("stop");
+            }}
+          >
+            Stop
+          </button>
+        </div>
+      </section>
     </aside>
   );
 }
