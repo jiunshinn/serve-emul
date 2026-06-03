@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef } from "react";
 import { StatusBar } from "./components/status-bar";
 import { DeviceStream } from "./components/device-stream";
 import { ControlBar, type HardwareKey } from "./components/control-bar";
+import { LogcatPanel } from "./components/logcat-panel";
 import { LocationPanel } from "./components/location-panel";
+import { SessionPanel } from "./components/session-panel";
 import { useStream } from "./lib/use-stream";
 
 export function App() {
@@ -40,7 +42,11 @@ export function App() {
         <div className="device">
           <DeviceStream canvasRef={canvasRef} send={send} />
         </div>
-        <LocationPanel />
+        <aside className="side-panel">
+          <LocationPanel />
+          <LogcatPanel />
+          <SessionPanel />
+        </aside>
       </main>
       <ControlBar onPress={onPress} />
     </>

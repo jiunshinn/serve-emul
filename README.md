@@ -23,10 +23,12 @@ v1. Working:
 - Multi-client (multiple browser tabs share one stream)
 - Auto-replay of SPS/PPS to clients joining mid-stream
 - Emulator GPS location control from the browser UI and `POST /api/location`
+- Route playback from GPX, GeoJSON, KML, or waypoint JSON
+- Logcat forwarding over SSE with browser-side filter, pause, and copy controls
+- Agent-friendly REST input APIs plus session event replay
 
 Planned:
 
-- Logcat forwarding over SSE
 - Multi-device routing
 - Embeddable Connect-style middleware (`serve-emu/middleware`)
 - Compiled single binary
@@ -99,6 +101,34 @@ Pause, resume, or stop playback:
 curl -X POST http://localhost:3300/api/route/control \
   -H 'Content-Type: application/json' \
   -d '{"action":"pause"}'
+```
+
+Drive the device with REST:
+
+```sh
+curl -X POST http://localhost:3300/api/tap \
+  -H 'Content-Type: application/json' \
+  -d '{"x":0.5,"y":0.5}'
+
+curl -X POST http://localhost:3300/api/text \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"hello"}'
+
+curl http://localhost:3300/api/screenshot --output screen.png
+```
+
+Stream logcat over SSE:
+
+```sh
+curl -N 'http://localhost:3300/api/logcat?package=com.example.app&search=error'
+```
+
+Replay recorded input and location events:
+
+```sh
+curl -X POST http://localhost:3300/api/session/replay \
+  -H 'Content-Type: application/json' \
+  -d '{"multiplier":2}'
 ```
 
 ## How it works

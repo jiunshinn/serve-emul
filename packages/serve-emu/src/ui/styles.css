@@ -31,7 +31,7 @@ header .meta {
 }
 main {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr) 380px;
   align-items: center;
   gap: 20px;
   padding: 24px;
@@ -92,11 +92,19 @@ input[type="checkbox"] {
   height: 16px;
   accent-color: #f2f2f7;
 }
-.location-panel {
+.side-panel {
   align-self: stretch;
   min-height: 0;
+  max-height: calc(100vh - 140px);
+  overflow: auto;
   border-left: 1px solid #1f1f24;
   padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.location-panel,
+.tool-panel {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -248,6 +256,45 @@ input[type="checkbox"] {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
+.panel-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.logcat-output {
+  box-sizing: border-box;
+  height: 220px;
+  width: 100%;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid #25252d;
+  border-radius: 8px;
+  background: #070709;
+  color: #d8d8de;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.session-list {
+  display: grid;
+  gap: 6px;
+  color: #d8d8de;
+  font-size: 12px;
+}
+.session-list div {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.session-list span {
+  color: #9a9aa3;
+  font-variant-numeric: tabular-nums;
+}
 @media (max-width: 920px) {
   body {
     min-height: 100dvh;
@@ -257,12 +304,13 @@ input[type="checkbox"] {
     align-items: start;
     padding: 16px;
   }
-  .location-panel {
+  .side-panel {
     border-left: 0;
     border-top: 1px solid #1f1f24;
     padding-left: 0;
     padding-top: 16px;
     width: min(100%, 520px);
+    max-height: none;
     justify-self: center;
   }
   canvas {

@@ -1,10 +1,13 @@
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { spawn, spawnSync } from "node:child_process";
 import type { ServerWebSocket } from "bun";
+import { screencapPng } from "./adb.ts";
 import { startScrcpy, type ScrcpySession } from "./scrcpy.ts";
-import { dispatch, parseGesture, resetVideoPacket, type Screen } from "./input.ts";
+import { dispatch, parseGesture, resetVideoPacket, type Gesture, type Screen } from "./input.ts";
 import { parseGeoFix, setEmulatorLocation, type GeoFix } from "./location.ts";
 import { parseRoutePlaybackRequest, RoutePlayback } from "./route-playback.ts";
+import { SessionRecorder } from "./session-recorder.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const UI_DIR = join(__dirname, "..", "dist", "ui");
@@ -43,6 +46,7 @@ const VIDEO_RESET_COOLDOWN_MS = 1500;
 const STALE_VIDEO_RESET_MS = 2500;
 const MAX_JSON_BODY_BYTES = 8 * 1024;
 const MAX_ROUTE_BODY_BYTES = 2 * 1024 * 1024;
+const MAX_LOGCAT_QUERY_BYTES = 200;
 
 export async function startServer(opts: ServerOpts) {
   const session: ScrcpySession = await startScrcpy({
@@ -76,6 +80,7 @@ export async function startServer(opts: ServerOpts) {
   let lastVideoResetMs = 0;
   let watchdog: ReturnType<typeof setInterval> | null = null;
   let lastLocation: (GeoFix & { appliedAt: string }) | null = null;
+  const sessionRecorder = new SessionRecorder();
   const routePlayback = new RoutePlayback({
     applyLocation: (fix) => setEmulatorLocation(opts.serial, fix),
     onLocation: (fix) => {
@@ -101,6 +106,7 @@ export async function startServer(opts: ServerOpts) {
     lastVideoResetReason,
     location: lastLocation,
     route: routePlayback.snapshot(),
+    session: sessionRecorder.snapshot(),
     clientsDetail: Array.from(clients, (client) => ({
       id: client.id,
       frameMeta: client.frameMeta,
@@ -179,6 +185,157 @@ export async function startServer(opts: ServerOpts) {
     const contentLength = Number(req.headers.get("content-length") ?? "0");
     if (contentLength > maxBytes) throw new Error("request body too large");
     return req.json();
+  };
+
+  const shouldRecord = (value: unknown) =>
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    (value as Record<string, unknown>).record !== false;
+
+  const dispatchGesture = async (gesture: Gesture, source: string, record = true) => {
+    if (status !== "streaming") throw new Error(`session is ${status}`);
+    await dispatch(session.controlSocket, gesture, screen);
+    if (record) sessionRecorder.recordGesture(gesture, source);
+  };
+
+  const applyLocation = (fix: GeoFix, source: string, record = true) => {
+    routePlayback.stop();
+    setEmulatorLocation(opts.serial, fix);
+    lastLocation = { ...fix, appliedAt: new Date().toISOString() };
+    if (record) sessionRecorder.recordLocation(fix, source);
+    return lastLocation;
+  };
+
+  const resolvePackagePids = (packageName: string): Set<string> => {
+    if (!/^[A-Za-z0-9_.:-]+$/.test(packageName)) return new Set();
+    const r = spawnSync("adb", ["-s", opts.serial, "shell", "pidof", packageName], {
+      encoding: "utf8",
+      timeout: 2_000,
+    });
+    if (r.status !== 0) return new Set();
+    return new Set(r.stdout.trim().split(/\s+/).filter(Boolean));
+  };
+
+  const logcatStream = (url: URL) => {
+    const packageName = (url.searchParams.get("package") ?? "").trim().slice(0, MAX_LOGCAT_QUERY_BYTES);
+    const search = (url.searchParams.get("search") ?? "").trim().slice(0, MAX_LOGCAT_QUERY_BYTES).toLowerCase();
+    const proc = spawn("adb", ["-s", opts.serial, "logcat", "-v", "threadtime"]);
+    const encoder = new TextEncoder();
+    let pidSet = packageName ? resolvePackagePids(packageName) : new Set<string>();
+    let pidTimer: ReturnType<typeof setInterval> | null = null;
+    let buffer = "";
+
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const send = (event: string, value: unknown) => {
+          try {
+            controller.enqueue(
+              encoder.encode(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`),
+            );
+          } catch {}
+        };
+        const matches = (line: string) => {
+          if (search && !line.toLowerCase().includes(search)) return false;
+          if (!packageName) return true;
+          const parts = line.trim().split(/\s+/, 5);
+          const pid = parts[2];
+          return (pid && pidSet.has(pid)) || line.includes(packageName);
+        };
+        const consume = (chunk: Buffer) => {
+          buffer += chunk.toString("utf8");
+          const lines = buffer.split(/\r?\n/);
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            if (line && matches(line)) send("log", { line, at: new Date().toISOString() });
+          }
+        };
+
+        send("ready", {
+          serial: opts.serial,
+          package: packageName || null,
+          pids: Array.from(pidSet),
+          search: search || null,
+        });
+        if (packageName) {
+          pidTimer = setInterval(() => {
+            pidSet = resolvePackagePids(packageName);
+          }, 5_000);
+        }
+        proc.stdout.on("data", consume);
+        proc.stderr.on("data", (chunk) => {
+          const text = chunk.toString("utf8").trim();
+          if (text) send("error", { line: text, at: new Date().toISOString() });
+        });
+        proc.once("exit", (code, signal) => {
+          send("close", { code, signal });
+          try {
+            controller.close();
+          } catch {}
+          if (pidTimer) clearInterval(pidTimer);
+        });
+        proc.once("error", (err) => {
+          send("error", { line: err.message, at: new Date().toISOString() });
+          try {
+            controller.close();
+          } catch {}
+          if (pidTimer) clearInterval(pidTimer);
+        });
+      },
+      cancel() {
+        if (pidTimer) clearInterval(pidTimer);
+        try {
+          proc.kill("SIGTERM");
+        } catch {}
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+      },
+    });
+  };
+
+  const gestureEndpoint = async (req: Request, type: Gesture["type"], source: string) => {
+    try {
+      const payload = await readJsonBody(req);
+      const gesture = parseGesture(
+        typeof payload === "object" && payload !== null && !Array.isArray(payload)
+          ? { ...payload, type }
+          : payload,
+      );
+      await dispatchGesture(gesture, source, shouldRecord(payload));
+      return Response.json({ ok: true });
+    } catch (err) {
+      return Response.json(
+        { ok: false, error: err instanceof Error ? err.message : String(err) },
+        { status: 400 },
+      );
+    }
+  };
+
+  const keyEndpoint = async (req: Request) => {
+    try {
+      const payload = await readJsonBody(req);
+      if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+        throw new Error("key payload must be an object");
+      }
+      const key = (payload as Record<string, unknown>).key;
+      const gesture =
+        key === "back" || key === "home" || key === "recents" || key === "power"
+          ? parseGesture({ type: key })
+          : parseGesture({ ...payload, type: "key" });
+      await dispatchGesture(gesture, "rest:key", shouldRecord(payload));
+      return Response.json({ ok: true });
+    } catch (err) {
+      return Response.json(
+        { ok: false, error: err instanceof Error ? err.message : String(err) },
+        { status: 400 },
+      );
+    }
   };
 
   const requestVideoReset = (reason: string) => {
@@ -316,6 +473,91 @@ export async function startServer(opts: ServerOpts) {
         return Response.json(health(), { status: status === "streaming" ? 200 : 503 });
       }
 
+      if (url.pathname === "/api/logcat") {
+        if (req.method !== "GET") return new Response("method not allowed", { status: 405 });
+        return logcatStream(url);
+      }
+
+      if (url.pathname === "/api/screenshot") {
+        if (req.method !== "GET" && req.method !== "POST") {
+          return new Response("method not allowed", { status: 405 });
+        }
+        try {
+          const png = screencapPng(opts.serial);
+          if (url.searchParams.get("format") === "base64") {
+            return Response.json({
+              ok: true,
+              mimeType: "image/png",
+              data: png.toString("base64"),
+            });
+          }
+          return new Response(new Uint8Array(png), { headers: { "Content-Type": "image/png" } });
+        } catch (err) {
+          return Response.json(
+            { ok: false, error: err instanceof Error ? err.message : String(err) },
+            { status: 400 },
+          );
+        }
+      }
+
+      if (url.pathname === "/api/tap") {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+        return gestureEndpoint(req, "tap", "rest:tap");
+      }
+
+      if (url.pathname === "/api/swipe") {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+        return gestureEndpoint(req, "swipe", "rest:swipe");
+      }
+
+      if (url.pathname === "/api/text") {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+        return gestureEndpoint(req, "text", "rest:text");
+      }
+
+      if (url.pathname === "/api/key") {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+        return keyEndpoint(req);
+      }
+
+      if (url.pathname === "/api/session") {
+        if (req.method === "GET") return Response.json(sessionRecorder.snapshot());
+        if (req.method === "DELETE") return Response.json({ ok: true, session: sessionRecorder.clear() });
+        return new Response("method not allowed", { status: 405 });
+      }
+
+      if (url.pathname === "/api/session/replay") {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+        try {
+          const payload = await readJsonBody(req);
+          const multiplier =
+            typeof payload === "object" && payload !== null && !Array.isArray(payload)
+              ? Number((payload as Record<string, unknown>).multiplier ?? 1)
+              : 1;
+          const replay = sessionRecorder.replay(
+            {
+              dispatchGesture: (gesture) => dispatchGesture(gesture, "session:replay", false),
+              setLocation: (fix) => {
+                applyLocation(fix, "session:replay", false);
+              },
+            },
+            multiplier,
+          );
+          void replay.catch(() => {});
+          return Response.json({ ok: true, session: sessionRecorder.snapshot() });
+        } catch (err) {
+          return Response.json(
+            { ok: false, error: err instanceof Error ? err.message : String(err) },
+            { status: 400 },
+          );
+        }
+      }
+
+      if (url.pathname === "/api/session/replay/stop") {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+        return Response.json({ ok: true, session: sessionRecorder.stopReplay() });
+      }
+
       if (url.pathname === "/api/location") {
         if (req.method === "GET") {
           return Response.json({
@@ -326,10 +568,8 @@ export async function startServer(opts: ServerOpts) {
         }
         if (req.method === "POST") {
           try {
-            routePlayback.stop();
             const fix = parseGeoFix(await readJsonBody(req));
-            setEmulatorLocation(opts.serial, fix);
-            lastLocation = { ...fix, appliedAt: new Date().toISOString() };
+            lastLocation = applyLocation(fix, "rest:location");
             return Response.json({ ok: true, location: lastLocation });
           } catch (err) {
             return Response.json(
@@ -432,7 +672,7 @@ export async function startServer(opts: ServerOpts) {
             return;
           }
           const msg = parseGesture(payload);
-          void dispatch(session.controlSocket, msg, screen)
+          void dispatchGesture(msg, "ws", shouldRecord(payload))
             .then(() => {
               if (acknowledge) sendJson(ws, { ok: true });
             })
