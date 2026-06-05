@@ -3,6 +3,13 @@ import { dirname, join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import type { ServerWebSocket } from "bun";
 import { screencapPng } from "./adb.ts";
+import {
+  clearAppData,
+  forceStopApp,
+  grantPermission,
+  installApk,
+  launchApp,
+} from "./app-management.ts";
 import { startScrcpy, type ScrcpySession } from "./scrcpy.ts";
 import { dispatch, parseGesture, resetVideoPacket, type Gesture, type Screen } from "./input.ts";
 import { parseGeoFix, setEmulatorLocation, type GeoFix } from "./location.ts";
@@ -338,6 +345,39 @@ export async function startServer(opts: ServerOpts) {
     }
   };
 
+  const appJsonEndpoint = async (
+    req: Request,
+    action: (payload: Record<string, unknown>) => unknown,
+  ) => {
+    try {
+      const payload = await readJsonBody(req);
+      if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+        throw new Error("payload must be an object");
+      }
+      const result = action(payload as Record<string, unknown>);
+      return Response.json(result);
+    } catch (err) {
+      return Response.json(
+        { ok: false, error: err instanceof Error ? err.message : String(err) },
+        { status: 400 },
+      );
+    }
+  };
+
+  const installEndpoint = async (req: Request) => {
+    try {
+      const form = await req.formData();
+      const file = form.get("apk");
+      if (!(file instanceof File)) throw new Error("multipart field apk must be a file");
+      return Response.json(await installApk(opts.serial, file));
+    } catch (err) {
+      return Response.json(
+        { ok: false, error: err instanceof Error ? err.message : String(err) },
+        { status: 400 },
+      );
+    }
+  };
+
   const requestVideoReset = (reason: string) => {
     const now = Date.now();
     if (now - lastVideoResetMs < VIDEO_RESET_COOLDOWN_MS) return;
@@ -556,6 +596,49 @@ export async function startServer(opts: ServerOpts) {
       if (url.pathname === "/api/session/replay/stop") {
         if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
         return Response.json({ ok: true, session: sessionRecorder.stopReplay() });
+      }
+
+      if (url.pathname === "/api/apps/install") {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+        return installEndpoint(req);
+      }
+
+      if (url.pathname === "/api/apps/launch") {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+        return appJsonEndpoint(req, (payload) =>
+          launchApp(
+            opts.serial,
+            String(payload.packageName ?? ""),
+            typeof payload.activity === "string" && payload.activity.trim()
+              ? payload.activity
+              : undefined,
+          ),
+        );
+      }
+
+      if (url.pathname === "/api/apps/clear") {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+        return appJsonEndpoint(req, (payload) =>
+          clearAppData(opts.serial, String(payload.packageName ?? "")),
+        );
+      }
+
+      if (url.pathname === "/api/apps/force-stop") {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+        return appJsonEndpoint(req, (payload) =>
+          forceStopApp(opts.serial, String(payload.packageName ?? "")),
+        );
+      }
+
+      if (url.pathname === "/api/apps/grant") {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+        return appJsonEndpoint(req, (payload) =>
+          grantPermission(
+            opts.serial,
+            String(payload.packageName ?? ""),
+            String(payload.permission ?? ""),
+          ),
+        );
       }
 
       if (url.pathname === "/api/location") {

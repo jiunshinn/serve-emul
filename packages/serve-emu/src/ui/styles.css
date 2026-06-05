@@ -222,6 +222,12 @@ input[type="checkbox"] {
   color: #9a9aa3;
   font-size: 11px;
 }
+.stacked-field {
+  display: grid;
+  gap: 5px;
+  color: #9a9aa3;
+  font-size: 11px;
+}
 .primary-action {
   width: 100%;
   background: #f2f2f7;
@@ -260,6 +266,9 @@ input[type="checkbox"] {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
+}
+.app-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .logcat-output {
   box-sizing: border-box;

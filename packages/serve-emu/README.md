@@ -24,6 +24,7 @@ v1. Working:
 - Route playback from GPX, GeoJSON, KML, or waypoint JSON
 - Logcat forwarding over SSE with browser-side filter, pause, and copy controls
 - Agent-friendly REST input APIs plus session event replay
+- App management controls for APK install, launch, clear data, force stop, and permission grants
 
 Planned:
 
@@ -127,6 +128,25 @@ Replay recorded input and location events:
 curl -X POST http://localhost:3300/api/session/replay \
   -H 'Content-Type: application/json' \
   -d '{"multiplier":2}'
+```
+
+Manage apps:
+
+```sh
+curl -X POST http://localhost:3300/api/apps/install \
+  -F apk=@/path/to/app.apk
+
+curl -X POST http://localhost:3300/api/apps/launch \
+  -H 'Content-Type: application/json' \
+  -d '{"packageName":"com.example.app","activity":".MainActivity"}'
+
+curl -X POST http://localhost:3300/api/apps/clear \
+  -H 'Content-Type: application/json' \
+  -d '{"packageName":"com.example.app"}'
+
+curl -X POST http://localhost:3300/api/apps/grant \
+  -H 'Content-Type: application/json' \
+  -d '{"packageName":"com.example.app","permission":"android.permission.POST_NOTIFICATIONS"}'
 ```
 
 ## How it works

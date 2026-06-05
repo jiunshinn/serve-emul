@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { StatusBar } from "./components/status-bar";
+import { AppManagementPanel } from "./components/app-management-panel";
 import { DeviceStream } from "./components/device-stream";
 import { ControlBar, type HardwareKey } from "./components/control-bar";
 import { LogcatPanel } from "./components/logcat-panel";
@@ -44,6 +45,7 @@ export function App() {
         </div>
         <aside className="side-panel">
           <LocationPanel />
+          <AppManagementPanel />
           <LogcatPanel />
           <SessionPanel />
         </aside>
