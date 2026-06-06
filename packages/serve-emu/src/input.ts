@@ -8,7 +8,7 @@ const TYPE_BACK_OR_SCREEN_ON = 4;
 const TYPE_RESET_VIDEO = 17;
 
 export function resetVideoPacket(): Buffer {
-  return Buffer.from([TYPE_RESET_VIDEO]);
+  return RESET_VIDEO_PACKET;
 }
 
 // Android KeyEvent action
@@ -28,6 +28,7 @@ const KEY = {
 const PRIMARY_POINTER_ID = 0n;
 const PRESSURE_FULL = 0xffff;
 const BUTTON_PRIMARY = 1;
+const RESET_VIDEO_PACKET = Buffer.from([TYPE_RESET_VIDEO]);
 
 export type Gesture =
   | { type: "tap"; x: number; y: number }
@@ -148,7 +149,7 @@ function touchPacket(
   screen: Screen,
   pointerId = PRIMARY_POINTER_ID,
 ): Buffer {
-  const buf = Buffer.alloc(32);
+  const buf = Buffer.allocUnsafe(32);
   let o = 0;
   buf.writeUInt8(TYPE_INJECT_TOUCH, o); o += 1;
   buf.writeUInt8(action, o); o += 1;
@@ -164,7 +165,7 @@ function touchPacket(
 }
 
 function keyPacket(action: number, keycode: number): Buffer {
-  const buf = Buffer.alloc(14);
+  const buf = Buffer.allocUnsafe(14);
   let o = 0;
   buf.writeUInt8(TYPE_INJECT_KEYCODE, o); o += 1;
   buf.writeUInt8(action, o); o += 1;
@@ -177,7 +178,7 @@ function keyPacket(action: number, keycode: number): Buffer {
 function textPacket(text: string): Buffer {
   const bytes = textBytes(text);
   const len = bytes.length;
-  const buf = Buffer.alloc(5 + len);
+  const buf = Buffer.allocUnsafe(5 + len);
   buf.writeUInt8(TYPE_INJECT_TEXT, 0);
   buf.writeUInt32BE(len, 1);
   bytes.copy(buf, 5);
@@ -185,7 +186,7 @@ function textPacket(text: string): Buffer {
 }
 
 function backOrScreenOnPacket(action: number): Buffer {
-  const buf = Buffer.alloc(2);
+  const buf = Buffer.allocUnsafe(2);
   buf.writeUInt8(TYPE_BACK_OR_SCREEN_ON, 0);
   buf.writeUInt8(action, 1);
   return buf;

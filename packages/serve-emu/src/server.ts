@@ -12,7 +12,7 @@ import {
 } from "./app-management.ts";
 import { startScrcpy, type ScrcpySession } from "./scrcpy.ts";
 import { dispatch, parseGesture, resetVideoPacket, type Gesture, type Screen } from "./input.ts";
-import { parseGeoFix, setEmulatorLocation, type GeoFix } from "./location.ts";
+import { parseGeoFix, setEmulatorLocationAsync, type GeoFix } from "./location.ts";
 import { parseRoutePlaybackRequest, RoutePlayback } from "./route-playback.ts";
 import { SessionRecorder } from "./session-recorder.ts";
 
@@ -69,14 +69,15 @@ export async function startServer(opts: ServerOpts) {
 
   const clients = new Set<Client>();
   const screen: Screen = { width: session.meta.width, height: session.meta.height };
-  const startedAt = new Date().toISOString();
+  const startedMs = Date.now();
+  const startedAt = new Date(startedMs).toISOString();
   let status: SessionStatus = "streaming";
   let lastError: string | null = null;
   let stoppedAt: string | null = null;
   let stopRequested = false;
   let frameCount = 0;
   let configPacketCount = 0;
-  let lastFrameAt: string | null = null;
+  let lastFrameMs = 0;
   let totalDroppedFrames = 0;
   let totalBackpressureEvents = 0;
   let sourceFps = 0;
@@ -89,7 +90,7 @@ export async function startServer(opts: ServerOpts) {
   let lastLocation: (GeoFix & { appliedAt: string }) | null = null;
   const sessionRecorder = new SessionRecorder();
   const routePlayback = new RoutePlayback({
-    applyLocation: (fix) => setEmulatorLocation(opts.serial, fix),
+    applyLocation: (fix) => setEmulatorLocationAsync(opts.serial, fix),
     onLocation: (fix) => {
       lastLocation = fix;
     },
@@ -125,7 +126,7 @@ export async function startServer(opts: ServerOpts) {
     })),
     startedAt,
     stoppedAt,
-    lastFrameAt,
+    lastFrameAt: lastFrameMs > 0 ? new Date(lastFrameMs).toISOString() : null,
     lastError,
   });
 
@@ -156,24 +157,27 @@ export async function startServer(opts: ServerOpts) {
   };
 
   const withFrameMeta = (
-    data: Buffer,
+    frameData: Buffer,
     frame: { pts: bigint; isKey: boolean },
+    config: Buffer | null,
   ): Buffer => {
-    const out = Buffer.allocUnsafe(FRAME_META_HEADER_BYTES + data.length);
+    const configBytes = config?.length ?? 0;
+    const out = Buffer.allocUnsafe(FRAME_META_HEADER_BYTES + configBytes + frameData.length);
     out.writeUInt32BE(FRAME_META_MAGIC, 0);
     out.writeUInt8(FRAME_META_VERSION, 4);
     out.writeUInt8(frame.isKey ? FRAME_FLAG_KEY : 0, 5);
     out.writeUInt16BE(0, 6);
     out.writeBigUInt64BE(frame.pts, 8);
-    data.copy(out, FRAME_META_HEADER_BYTES);
+    if (config) config.copy(out, FRAME_META_HEADER_BYTES);
+    frameData.copy(out, FRAME_META_HEADER_BYTES + configBytes);
     return out;
   };
 
-  const makeKeyframeAU = (frameData: Buffer): Buffer => {
-    if (!cachedConfig) return frameData;
-    const out = Buffer.allocUnsafe(cachedConfig.length + frameData.length);
-    cachedConfig.copy(out, 0);
-    frameData.copy(out, cachedConfig.length);
+  const withConfig = (frameData: Buffer, config: Buffer | null): Buffer => {
+    if (!config) return frameData;
+    const out = Buffer.allocUnsafe(config.length + frameData.length);
+    config.copy(out, 0);
+    frameData.copy(out, config.length);
     return out;
   };
 
@@ -206,9 +210,9 @@ export async function startServer(opts: ServerOpts) {
     if (record) sessionRecorder.recordGesture(gesture, source);
   };
 
-  const applyLocation = (fix: GeoFix, source: string, record = true) => {
+  const applyLocation = async (fix: GeoFix, source: string, record = true) => {
     routePlayback.stop();
-    setEmulatorLocation(opts.serial, fix);
+    await setEmulatorLocationAsync(opts.serial, fix);
     lastLocation = { ...fix, appliedAt: new Date().toISOString() };
     if (record) sessionRecorder.recordLocation(fix, source);
     return lastLocation;
@@ -451,8 +455,9 @@ export async function startServer(opts: ServerOpts) {
           continue;
         }
         frameCount++;
-        lastFrameAt = new Date().toISOString();
-        const rawOut = f.isKey && cachedConfig ? makeKeyframeAU(f.data) : f.data;
+        lastFrameMs = Date.now();
+        const config = f.isKey ? cachedConfig : null;
+        let rawOut: Buffer | null = null;
         let framedOut: Buffer | null = null;
         for (const c of clients) {
           if (c.awaitingKeyFrame && !f.isKey) {
@@ -461,8 +466,8 @@ export async function startServer(opts: ServerOpts) {
             continue;
           }
           const out = c.frameMeta
-            ? (framedOut ??= withFrameMeta(rawOut, f))
-            : rawOut;
+            ? (framedOut ??= withFrameMeta(f.data, f, config))
+            : (rawOut ??= withConfig(f.data, config));
           sendFrame(c, out, f.isKey);
         }
       }
@@ -475,8 +480,8 @@ export async function startServer(opts: ServerOpts) {
     sourceFps = frameCount - lastFpsFrameCount;
     lastFpsFrameCount = frameCount;
     if (status !== "streaming" || clients.size === 0) return;
-    const lastFrameMs = lastFrameAt ? Date.parse(lastFrameAt) : Date.parse(startedAt);
-    if (Date.now() - lastFrameMs > STALE_VIDEO_RESET_MS) {
+    const lastFrameSeenMs = lastFrameMs || startedMs;
+    if (Date.now() - lastFrameSeenMs > STALE_VIDEO_RESET_MS) {
       requestVideoReset("source stream stalled");
     }
   }, 1000);
@@ -577,8 +582,8 @@ export async function startServer(opts: ServerOpts) {
           const replay = sessionRecorder.replay(
             {
               dispatchGesture: (gesture) => dispatchGesture(gesture, "session:replay", false),
-              setLocation: (fix) => {
-                applyLocation(fix, "session:replay", false);
+              setLocation: async (fix) => {
+                await applyLocation(fix, "session:replay", false);
               },
             },
             multiplier,
@@ -652,7 +657,7 @@ export async function startServer(opts: ServerOpts) {
         if (req.method === "POST") {
           try {
             const fix = parseGeoFix(await readJsonBody(req));
-            lastLocation = applyLocation(fix, "rest:location");
+            lastLocation = await applyLocation(fix, "rest:location");
             return Response.json({ ok: true, location: lastLocation });
           } catch (err) {
             return Response.json(
@@ -671,7 +676,7 @@ export async function startServer(opts: ServerOpts) {
         if (req.method === "POST") {
           try {
             const route = parseRoutePlaybackRequest(await readJsonBody(req, MAX_ROUTE_BODY_BYTES));
-            return Response.json({ ok: true, route: routePlayback.start(route) });
+            return Response.json({ ok: true, route: await routePlayback.start(route) });
           } catch (err) {
             return Response.json(
               { ok: false, error: err instanceof Error ? err.message : String(err) },

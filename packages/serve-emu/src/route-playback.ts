@@ -35,7 +35,7 @@ export type RoutePlaybackSnapshot = {
 };
 
 type RoutePlaybackOpts = {
-  applyLocation: (fix: GeoFix) => void;
+  applyLocation: (fix: GeoFix) => void | Promise<void>;
   onLocation: (fix: GeoFix & { appliedAt: string }) => void;
 };
 
@@ -155,11 +155,21 @@ function prepareRoute(waypoints: RouteWaypoint[]): PreparedRoute {
   return { waypoints, cumulativeMeters, totalMeters };
 }
 
+function segmentForProgress(cumulativeMeters: number[], progress: number): number {
+  let low = 1;
+  let high = cumulativeMeters.length - 1;
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (cumulativeMeters[mid] >= progress) high = mid;
+    else low = mid + 1;
+  }
+  return low;
+}
+
 function locationAt(route: PreparedRoute, progressMeters: number): GeoFix {
   if (route.waypoints.length === 1 || route.totalMeters === 0) return route.waypoints[0];
   const progress = clamp(progressMeters, 0, route.totalMeters);
-  let segment = route.cumulativeMeters.findIndex((meters) => meters >= progress);
-  if (segment <= 0) segment = 1;
+  const segment = segmentForProgress(route.cumulativeMeters, progress);
   const startMeters = route.cumulativeMeters[segment - 1];
   const endMeters = route.cumulativeMeters[segment];
   const t = endMeters === startMeters ? 0 : (progress - startMeters) / (endMeters - startMeters);
@@ -208,13 +218,15 @@ export class RoutePlayback {
   #completedAt: string | null = null;
   #lastError: string | null = null;
   #currentLocation: (GeoFix & { appliedAt: string }) | null = null;
+  #applying = false;
+  #applyId = 0;
 
   constructor(opts: RoutePlaybackOpts) {
     this.#applyLocation = opts.applyLocation;
     this.#onLocation = opts.onLocation;
   }
 
-  start(request: RoutePlaybackRequest): RoutePlaybackSnapshot {
+  async start(request: RoutePlaybackRequest): Promise<RoutePlaybackSnapshot> {
     this.stop();
     this.#route = prepareRoute(request.waypoints);
     this.#speedKph = request.speedKph ?? DEFAULT_SPEED_KPH;
@@ -229,8 +241,10 @@ export class RoutePlayback {
     this.#pausedAt = null;
     this.#completedAt = null;
     this.#lastError = null;
-    this.#applyCurrentLocation();
-    this.#timer = setInterval(() => this.#tick(), this.#intervalMs);
+    await this.#applyCurrentLocation();
+    if (this.#status === "running") {
+      this.#timer = setInterval(() => this.#tick(), this.#intervalMs);
+    }
     return this.snapshot();
   }
 
@@ -255,6 +269,8 @@ export class RoutePlayback {
 
   stop(): RoutePlaybackSnapshot {
     this.#clearTimer();
+    this.#applyId++;
+    this.#applying = false;
     this.#route = null;
     this.#status = "idle";
     this.#progressMeters = 0;
@@ -290,7 +306,11 @@ export class RoutePlayback {
   }
 
   #tick(): void {
-    if (!this.#route || this.#status !== "running") return;
+    void this.#tickNow();
+  }
+
+  async #tickNow(): Promise<void> {
+    if (!this.#route || this.#status !== "running" || this.#applying) return;
     const now = Date.now();
     const elapsedSeconds = Math.max(0, (now - this.#lastTickMs) / 1000);
     this.#lastTickMs = now;
@@ -306,21 +326,29 @@ export class RoutePlayback {
         this.#clearTimer();
       }
     }
-    this.#applyCurrentLocation();
+    await this.#applyCurrentLocation();
   }
 
-  #applyCurrentLocation(): void {
-    if (!this.#route) return;
+  async #applyCurrentLocation(): Promise<void> {
+    const route = this.#route;
+    if (!route) return;
+    const applyId = ++this.#applyId;
+    this.#applying = true;
     try {
-      const fix = locationAt(this.#route, this.#progressMeters);
-      this.#applyLocation(fix);
+      const fix = locationAt(route, this.#progressMeters);
+      await this.#applyLocation(fix);
+      if (this.#route !== route || this.#applyId !== applyId) return;
       this.#currentLocation = { ...fix, appliedAt: new Date().toISOString() };
       this.#updatedAt = this.#currentLocation.appliedAt;
       this.#onLocation(this.#currentLocation);
     } catch (err) {
-      this.#status = "error";
-      this.#lastError = err instanceof Error ? err.message : String(err);
-      this.#clearTimer();
+      if (this.#route === route && this.#applyId === applyId) {
+        this.#status = "error";
+        this.#lastError = err instanceof Error ? err.message : String(err);
+        this.#clearTimer();
+      }
+    } finally {
+      if (this.#applyId === applyId) this.#applying = false;
     }
   }
 
