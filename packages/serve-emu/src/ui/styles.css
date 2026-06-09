@@ -53,6 +53,25 @@ canvas {
   user-select: none;
   touch-action: none;
 }
+.stream-surface {
+  position: relative;
+}
+.ax-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.ax-box {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid rgba(92, 200, 255, 0.58);
+  background: rgba(92, 200, 255, 0.08);
+}
+.ax-box.active {
+  border-color: #ffcc66;
+  background: rgba(255, 204, 102, 0.18);
+  box-shadow: 0 0 0 1px rgba(255, 204, 102, 0.35);
+}
 footer {
   display: flex;
   gap: 8px;
@@ -269,6 +288,167 @@ input[type="checkbox"] {
 }
 .app-actions {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.ax-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.ax-list {
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow: auto;
+  padding-right: 2px;
+}
+.ax-node {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 7px 8px;
+  text-align: left;
+}
+.ax-node.active {
+  border-color: #5cc8ff;
+  background: #18303d;
+}
+.ax-node span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ax-node code {
+  color: #9a9aa3;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+}
+.ax-empty {
+  padding: 12px;
+  border: 1px dashed #2a2a32;
+  border-radius: 8px;
+  color: #8a8a93;
+  font-size: 12px;
+  text-align: center;
+}
+.device-list {
+  display: grid;
+  gap: 6px;
+}
+.device-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid #25252d;
+  border-radius: 8px;
+  background: #111116;
+}
+.device-row.current {
+  border-color: #3f7d5c;
+  background: #132219;
+}
+.device-row span {
+  min-width: 0;
+  overflow: hidden;
+  color: #f2f2f7;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.device-row code {
+  color: #9a9aa3;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+}
+.device-empty {
+  padding: 12px;
+  border: 1px dashed #2a2a32;
+  border-radius: 8px;
+  color: #8a8a93;
+  font-size: 12px;
+  text-align: center;
+}
+.foreground-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #25252d;
+  border-radius: 8px;
+  background: #111116;
+}
+.foreground-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.foreground-title span {
+  min-width: 0;
+  overflow: hidden;
+  color: #f2f2f7;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.foreground-title button {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  font-size: 11px;
+}
+.foreground-card dl {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+}
+.foreground-card dl div {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px;
+}
+.foreground-card dt {
+  color: #8a8a93;
+  font-size: 11px;
+}
+.foreground-card dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: #d8d8de;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.foreground-empty {
+  color: #8a8a93;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.file-drop {
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border: 1px dashed #34343d;
+  border-radius: 8px;
+  background: #111116;
+  color: #d8d8de;
+  text-align: center;
+}
+.file-drop.active {
+  border-color: #5cc8ff;
+  background: #13242d;
+}
+.file-drop span {
+  font-size: 13px;
+  font-weight: 600;
+}
+.file-drop small {
+  color: #8a8a93;
+  font-size: 11px;
 }
 .logcat-output {
   box-sizing: border-box;

@@ -2,14 +2,17 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import type { ServerWebSocket } from "bun";
-import { screencapPng } from "./adb.ts";
+import { listAllDevices, screencapPng } from "./adb.ts";
+import { getAccessibilitySnapshot } from "./accessibility.ts";
 import {
   clearAppData,
   forceStopApp,
   grantPermission,
+  importMediaFile,
   installApk,
   launchApp,
 } from "./app-management.ts";
+import { getForegroundApp } from "./app-info.ts";
 import { startScrcpy, type ScrcpySession } from "./scrcpy.ts";
 import { dispatch, parseGesture, resetVideoPacket, type Gesture, type Screen } from "./input.ts";
 import { parseGeoFix, setEmulatorLocationAsync, type GeoFix } from "./location.ts";
@@ -382,6 +385,20 @@ export async function startServer(opts: ServerOpts) {
     }
   };
 
+  const fileImportEndpoint = async (req: Request) => {
+    try {
+      const form = await req.formData();
+      const file = form.get("file");
+      if (!(file instanceof File)) throw new Error("multipart field file must be a file");
+      return Response.json(await importMediaFile(opts.serial, file));
+    } catch (err) {
+      return Response.json(
+        { ok: false, error: err instanceof Error ? err.message : String(err) },
+        { status: 400 },
+      );
+    }
+  };
+
   const requestVideoReset = (reason: string) => {
     const now = Date.now();
     if (now - lastVideoResetMs < VIDEO_RESET_COOLDOWN_MS) return;
@@ -514,6 +531,25 @@ export async function startServer(opts: ServerOpts) {
         });
       }
 
+      if (url.pathname === "/api/devices") {
+        if (req.method !== "GET") return new Response("method not allowed", { status: 405 });
+        try {
+          return Response.json({
+            ok: true,
+            currentSerial: opts.serial,
+            devices: listAllDevices().map((device) => ({
+              ...device,
+              current: device.serial === opts.serial,
+            })),
+          });
+        } catch (err) {
+          return Response.json(
+            { ok: false, error: err instanceof Error ? err.message : String(err) },
+            { status: 400 },
+          );
+        }
+      }
+
       if (url.pathname === "/health") {
         return Response.json(health(), { status: status === "streaming" ? 200 : 503 });
       }
@@ -537,6 +573,30 @@ export async function startServer(opts: ServerOpts) {
             });
           }
           return new Response(new Uint8Array(png), { headers: { "Content-Type": "image/png" } });
+        } catch (err) {
+          return Response.json(
+            { ok: false, error: err instanceof Error ? err.message : String(err) },
+            { status: 400 },
+          );
+        }
+      }
+
+      if (url.pathname === "/api/foreground") {
+        if (req.method !== "GET") return new Response("method not allowed", { status: 405 });
+        try {
+          return Response.json({ ok: true, app: getForegroundApp(opts.serial) });
+        } catch (err) {
+          return Response.json(
+            { ok: false, error: err instanceof Error ? err.message : String(err) },
+            { status: 400 },
+          );
+        }
+      }
+
+      if (url.pathname === "/api/accessibility") {
+        if (req.method !== "GET") return new Response("method not allowed", { status: 405 });
+        try {
+          return Response.json(getAccessibilitySnapshot(opts.serial));
         } catch (err) {
           return Response.json(
             { ok: false, error: err instanceof Error ? err.message : String(err) },
@@ -606,6 +666,11 @@ export async function startServer(opts: ServerOpts) {
       if (url.pathname === "/api/apps/install") {
         if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
         return installEndpoint(req);
+      }
+
+      if (url.pathname === "/api/files/import") {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+        return fileImportEndpoint(req);
       }
 
       if (url.pathname === "/api/apps/launch") {

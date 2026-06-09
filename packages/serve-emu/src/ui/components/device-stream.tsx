@@ -1,17 +1,29 @@
 import { useRef } from "react";
 import type { PointerEvent, RefObject } from "react";
 import type { Sender } from "../lib/use-stream";
+import type { AccessibilityNode } from "./accessibility-panel";
 
 type Props = {
   canvasRef: RefObject<HTMLCanvasElement>;
   send: Sender;
+  accessibilityNodes?: AccessibilityNode[];
+  accessibilityEnabled?: boolean;
+  highlightedAccessibilityId?: string | null;
+  deviceSize?: { width: number; height: number } | null;
 };
 
 type Point = { x: number; y: number };
 
 const clamp01 = (n: number) => Math.min(1, Math.max(0, n));
 
-export function DeviceStream({ canvasRef, send }: Props) {
+export function DeviceStream({
+  canvasRef,
+  send,
+  accessibilityNodes = [],
+  accessibilityEnabled = false,
+  highlightedAccessibilityId = null,
+  deviceSize = null,
+}: Props) {
   const activeRef = useRef<{ id: number; x: number; y: number } | null>(null);
   const pendingMoveRef = useRef<Point | null>(null);
   const moveRafRef = useRef(0);
@@ -98,13 +110,33 @@ export function DeviceStream({ canvasRef, send }: Props) {
   };
 
   return (
-    <canvas
-      ref={canvasRef}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={stopPointer}
-      onPointerCancel={stopPointer}
-      onContextMenu={(e) => e.preventDefault()}
-    />
+    <div className="stream-surface">
+      <canvas
+        ref={canvasRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={stopPointer}
+        onPointerCancel={stopPointer}
+        onContextMenu={(e) => e.preventDefault()}
+      />
+      {accessibilityEnabled && deviceSize && (
+        <div className="ax-overlay" aria-hidden="true">
+          {accessibilityNodes.map((node) => {
+            const left = (node.bounds.left / deviceSize.width) * 100;
+            const top = (node.bounds.top / deviceSize.height) * 100;
+            const width = ((node.bounds.right - node.bounds.left) / deviceSize.width) * 100;
+            const height = ((node.bounds.bottom - node.bounds.top) / deviceSize.height) * 100;
+            const active = node.id === highlightedAccessibilityId;
+            return (
+              <div
+                key={node.id}
+                className={active ? "ax-box active" : "ax-box"}
+                style={{ left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%` }}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }

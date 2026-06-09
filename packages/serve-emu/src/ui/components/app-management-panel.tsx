@@ -1,9 +1,21 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 
 type AppApiResult = {
   ok?: boolean;
   output?: string;
   error?: string;
+  path?: string;
+  kind?: string;
+};
+
+type ForegroundApp = {
+  packageName: string | null;
+  activity: string | null;
+  pid: number | null;
+  label: string | null;
+  versionName: string | null;
+  versionCode: string | null;
+  debuggable: boolean | null;
 };
 
 async function postJson(path: string, body: Record<string, unknown>): Promise<AppApiResult> {
@@ -19,12 +31,48 @@ function outputFor(result: AppApiResult): string {
   return result.ok ? result.output || "OK" : result.error || "Failed";
 }
 
+function isApk(file: File): boolean {
+  return file.name.toLowerCase().endsWith(".apk") || file.type === "application/vnd.android.package-archive";
+}
+
 export function AppManagementPanel() {
   const apkRef = useRef<HTMLInputElement>(null);
   const [packageName, setPackageName] = useState("");
   const [activity, setActivity] = useState("");
   const [permission, setPermission] = useState("android.permission.POST_NOTIFICATIONS");
   const [status, setStatus] = useState("Ready");
+  const [dragOver, setDragOver] = useState(false);
+  const [foreground, setForeground] = useState<ForegroundApp | null>(null);
+  const [foregroundError, setForegroundError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const res = await fetch("/api/foreground", { cache: "no-store" });
+        const json = await res.json() as { ok?: boolean; app?: ForegroundApp; error?: string };
+        if (cancelled) return;
+        if (json.ok && json.app) {
+          setForeground(json.app);
+          setForegroundError(null);
+        } else {
+          setForeground(null);
+          setForegroundError(json.error || "Foreground app unavailable");
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setForeground(null);
+          setForegroundError(err instanceof Error ? err.message : String(err));
+        }
+      }
+    };
+    void refresh();
+    const timer = setInterval(refresh, 2500);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
 
   const run = async (label: string, request: () => Promise<AppApiResult>) => {
     setStatus(`${label}...`);
@@ -36,19 +84,39 @@ export function AppManagementPanel() {
     }
   };
 
+  const uploadFile = async (file: File) => {
+    const apk = isApk(file);
+    await run(apk ? "Installing" : "Importing", async () => {
+      const form = new FormData();
+      form.set(apk ? "apk" : "file", file);
+      const res = await fetch(apk ? "/api/apps/install" : "/api/files/import", {
+        method: "POST",
+        body: form,
+      });
+      return await res.json() as AppApiResult;
+    });
+  };
+
   const install = async () => {
     const file = apkRef.current?.files?.[0];
     if (!file) {
-      setStatus("Choose an APK first");
+      setStatus("Choose an APK, image, or video first");
       return;
     }
-    await run("Installing", async () => {
-      const form = new FormData();
-      form.set("apk", file);
-      const res = await fetch("/api/apps/install", { method: "POST", body: form });
-      return await res.json() as AppApiResult;
-    });
+    await uploadFile(file);
     if (apkRef.current) apkRef.current.value = "";
+  };
+
+  const onDrop = (event: DragEvent) => {
+    event.preventDefault();
+    setDragOver(false);
+    const files = Array.from(event.dataTransfer.files);
+    if (files.length === 0) return;
+    void (async () => {
+      for (const file of files) {
+        await uploadFile(file);
+      }
+    })();
   };
 
   const packageBody = () => ({ packageName: packageName.trim() });
@@ -59,9 +127,77 @@ export function AppManagementPanel() {
         <h2>Apps</h2>
         <div className="location-status">{status}</div>
       </div>
-      <input ref={apkRef} type="file" accept=".apk,application/vnd.android.package-archive" />
+      <div className="foreground-card">
+        <div className="foreground-title">
+          <span>{foreground?.label || foreground?.packageName || "No foreground app"}</span>
+          {foreground?.packageName && (
+            <button
+              type="button"
+              onClick={() => {
+                setPackageName(foreground.packageName || "");
+                setActivity(foreground.activity || "");
+              }}
+            >
+              Use
+            </button>
+          )}
+        </div>
+        {foreground?.packageName ? (
+          <dl>
+            <div>
+              <dt>Package</dt>
+              <dd>{foreground.packageName}</dd>
+            </div>
+            <div>
+              <dt>Activity</dt>
+              <dd>{foreground.activity || "—"}</dd>
+            </div>
+            <div>
+              <dt>Version</dt>
+              <dd>
+                {foreground.versionName || "—"}
+                {foreground.versionCode ? ` (${foreground.versionCode})` : ""}
+              </dd>
+            </div>
+            <div>
+              <dt>PID</dt>
+              <dd>{foreground.pid ?? "—"}</dd>
+            </div>
+            <div>
+              <dt>Debuggable</dt>
+              <dd>{foreground.debuggable == null ? "—" : foreground.debuggable ? "yes" : "no"}</dd>
+            </div>
+          </dl>
+        ) : (
+          <div className="foreground-empty">{foregroundError || "Waiting for app focus..."}</div>
+        )}
+      </div>
+      <div
+        className={dragOver ? "file-drop active" : "file-drop"}
+        onDragEnter={(event) => {
+          event.preventDefault();
+          setDragOver(true);
+        }}
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+        }}
+        onDragLeave={(event) => {
+          event.preventDefault();
+          setDragOver(false);
+        }}
+        onDrop={onDrop}
+      >
+        <span>Drop APK, image, or video</span>
+        <small>APK installs; media is pushed to device storage.</small>
+      </div>
+      <input
+        ref={apkRef}
+        type="file"
+        accept=".apk,application/vnd.android.package-archive,image/*,video/*"
+      />
       <button className="primary-action" onClick={() => void install()}>
-        Install APK
+        Upload Selected File
       </button>
       <label className="stacked-field">
         Package
