@@ -30,6 +30,13 @@ type OrientationResponse = {
   error?: string;
 };
 
+type NightMode = "auto" | "dark" | "light";
+type NightModeResponse = {
+  ok?: boolean;
+  nightMode?: { mode?: NightMode | "unknown"; raw?: string };
+  error?: string;
+};
+
 type BusyAction = "select" | "start" | "stop";
 
 export function DevicePanel() {
@@ -225,6 +232,85 @@ export function OrientationPanel() {
         <button
           className={orientation === "auto" ? "selected" : ""}
           onClick={() => void setDeviceOrientation("auto")}
+        >
+          Auto
+        </button>
+      </div>
+    </section>
+  );
+}
+
+export function NightModePanel() {
+  const [nightMode, setNightMode] = useState<NightMode | "unknown">("unknown");
+  const [nightModeStatus, setNightModeStatus] = useState("Loading...");
+
+  const refreshNightMode = useCallback(async () => {
+    try {
+      const res = await fetch("/api/night-mode", { cache: "no-store" });
+      const json = await res.json() as NightModeResponse;
+      if (!json.ok || !json.nightMode) {
+        setNightMode("unknown");
+        setNightModeStatus(json.error || "Unavailable");
+        return;
+      }
+      const next = json.nightMode.mode ?? "unknown";
+      setNightMode(next);
+      setNightModeStatus(next === "unknown" ? json.nightMode.raw || "Unknown" : next);
+    } catch (err) {
+      setNightMode("unknown");
+      setNightModeStatus(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  const setDeviceNightMode = useCallback(async (next: NightMode) => {
+    setNightModeStatus("Applying...");
+    try {
+      const res = await fetch("/api/night-mode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: next }),
+      });
+      const json = await res.json() as NightModeResponse;
+      if (!json.ok || !json.nightMode) {
+        setNightModeStatus(json.error || "Failed");
+        return;
+      }
+      const applied = json.nightMode.mode ?? "unknown";
+      setNightMode(applied);
+      setNightModeStatus(applied === "unknown" ? json.nightMode.raw || "Unknown" : applied);
+    } catch (err) {
+      setNightModeStatus(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshNightMode();
+    const timer = setInterval(() => void refreshNightMode(), 3000);
+    return () => clearInterval(timer);
+  }, [refreshNightMode]);
+
+  return (
+    <section className="tool-panel night-mode-panel">
+      <div className="panel-heading">
+        <h2>Theme</h2>
+        <div className="location-status">{nightModeStatus}</div>
+      </div>
+      <div className="segmented-row">
+        <button
+          className={nightMode === "dark" ? "selected" : ""}
+          onClick={() => void setDeviceNightMode("dark")}
+        >
+          Dark
+        </button>
+        <button
+          className={nightMode === "light" ? "selected" : ""}
+          onClick={() => void setDeviceNightMode("light")}
+        >
+          Light
+        </button>
+        <button
+          className={nightMode === "auto" ? "selected" : ""}
+          onClick={() => void setDeviceNightMode("auto")}
         >
           Auto
         </button>

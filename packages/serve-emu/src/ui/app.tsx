@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { StatusBar } from "./components/status-bar";
 import { AppManagementPanel } from "./components/app-management-panel";
 import { AccessibilityPanel, type AccessibilityNode } from "./components/accessibility-panel";
-import { DevicePanel, OrientationPanel } from "./components/device-panel";
+import { DevicePanel, NightModePanel, OrientationPanel } from "./components/device-panel";
 import { DeviceStream } from "./components/device-stream";
 import { ControlBar, type HardwareKey } from "./components/control-bar";
 import { LogcatPanel } from "./components/logcat-panel";
@@ -72,6 +72,7 @@ export function App() {
           />
         </div>
         <aside className="side-panel">
+          <NightModePanel />
           <OrientationPanel />
           <AccessibilityPanel
             enabled={accessibilityEnabled}

@@ -2,10 +2,15 @@ import { spawn, spawnSync } from "node:child_process";
 
 export type Device = { serial: string; state: string };
 export type OrientationMode = "auto" | "portrait" | "landscape";
+export type NightMode = "auto" | "dark" | "light";
 export type OrientationStatus = {
   mode: "free" | "lock" | "unknown";
   rotation: number | null;
   orientation: OrientationMode | "unknown";
+  raw: string;
+};
+export type NightModeStatus = {
+  mode: NightMode | "unknown";
   raw: string;
 };
 
@@ -94,4 +99,30 @@ export function setUserRotation(serial: string, orientation: OrientationMode): O
   const r = spawnSync("adb", ["-s", serial, "shell", ...args], { encoding: "utf8" });
   if (r.status !== 0) throw new Error(`adb shell ${args.join(" ")} failed: ${r.stderr}`);
   return getUserRotation(serial);
+}
+
+function nightModeFromRaw(raw: string): NightMode | "unknown" {
+  const match = raw.match(/Night mode:\s*(\S+)/i);
+  const value = (match?.[1] ?? raw).trim().toLowerCase();
+  if (value === "yes") return "dark";
+  if (value === "no") return "light";
+  if (value === "auto") return "auto";
+  return "unknown";
+}
+
+export function getNightMode(serial: string): NightModeStatus {
+  const r = spawnSync("adb", ["-s", serial, "shell", "cmd", "uimode", "night"], {
+    encoding: "utf8",
+  });
+  if (r.status !== 0) throw new Error(`cmd uimode night failed: ${r.stderr}`);
+  const raw = r.stdout.trim();
+  return { mode: nightModeFromRaw(raw), raw };
+}
+
+export function setNightMode(serial: string, mode: NightMode): NightModeStatus {
+  const value = mode === "dark" ? "yes" : mode === "light" ? "no" : "auto";
+  const args = ["cmd", "uimode", "night", value];
+  const r = spawnSync("adb", ["-s", serial, "shell", ...args], { encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`adb shell ${args.join(" ")} failed: ${r.stderr}`);
+  return getNightMode(serial);
 }
