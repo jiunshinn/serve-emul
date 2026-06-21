@@ -18,7 +18,9 @@ Use `@latest` for one-off runs so Bun/npm fetches the newest published version i
 
 ## Status
 
-v1. Working:
+Current package version: see [`packages/serve-emu/package.json`](packages/serve-emu/package.json) and [`CHANGELOG.md`](packages/serve-emu/CHANGELOG.md).
+
+Working:
 
 - Live H.264 video stream from device → WebCodecs canvas
 - Taps, swipes, hardware buttons (Back / Home / Recents / Power)

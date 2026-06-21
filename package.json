@@ -4,7 +4,10 @@
   "workspaces": ["packages/*"],
   "scripts": {
     "dev": "bun run --filter serve-emu dev",
-    "build": "bun run --filter serve-emu build"
+    "build": "bun run --filter serve-emu build",
+    "test": "bun run --filter serve-emu test",
+    "check": "bun run --filter serve-emu check",
+    "release": "bun run --filter serve-emu release"
   },
   "devDependencies": {
     "typescript": "^5.6.0",
