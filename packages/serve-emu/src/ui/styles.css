@@ -531,6 +531,21 @@ input[type="checkbox"] {
   background: #173522;
   color: #f2f2f7;
 }
+.font-scale-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+.font-scale-row button {
+  min-width: 0;
+  padding: 8px 4px;
+  font-size: 12px;
+}
+.font-scale-row button.selected {
+  border-color: #3f7d5c;
+  background: #173522;
+  color: #f2f2f7;
+}
 .foreground-card {
   display: grid;
   gap: 8px;

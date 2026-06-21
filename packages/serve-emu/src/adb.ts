@@ -9,6 +9,10 @@ export type OrientationStatus = {
   orientation: OrientationMode | "unknown";
   raw: string;
 };
+export type FontScaleStatus = {
+  scale: number;
+  raw: string;
+};
 export type NightModeStatus = {
   mode: NightMode | "unknown";
   raw: string;
@@ -99,6 +103,30 @@ export function setUserRotation(serial: string, orientation: OrientationMode): O
   const r = spawnSync("adb", ["-s", serial, "shell", ...args], { encoding: "utf8" });
   if (r.status !== 0) throw new Error(`adb shell ${args.join(" ")} failed: ${r.stderr}`);
   return getUserRotation(serial);
+}
+
+export function getFontScale(serial: string): FontScaleStatus {
+  const r = spawnSync("adb", ["-s", serial, "shell", "settings", "get", "system", "font_scale"], {
+    encoding: "utf8",
+  });
+  if (r.status !== 0) throw new Error(`settings get system font_scale failed: ${r.stderr}`);
+  const raw = r.stdout.trim();
+  const scale = Number(raw);
+  if (!Number.isFinite(scale) || scale <= 0) {
+    throw new Error(`Could not parse font_scale output: ${r.stdout}`);
+  }
+  return { scale, raw };
+}
+
+export function setFontScale(serial: string, scale: number): FontScaleStatus {
+  if (!Number.isFinite(scale) || scale < 0.7 || scale > 2) {
+    throw new Error("font scale must be between 0.7 and 2.0");
+  }
+  const normalized = scale.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+  const args = ["settings", "put", "system", "font_scale", normalized];
+  const r = spawnSync("adb", ["-s", serial, "shell", ...args], { encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`adb shell ${args.join(" ")} failed: ${r.stderr}`);
+  return getFontScale(serial);
 }
 
 function nightModeFromRaw(raw: string): NightMode | "unknown" {

@@ -3,10 +3,12 @@ import { dirname, join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import type { ServerWebSocket } from "bun";
 import {
+  getFontScale,
   getNightMode,
   getUserRotation,
   listAllDevices,
   screencapPng,
+  setFontScale,
   setNightMode,
   setUserRotation,
   type NightMode,
@@ -864,6 +866,41 @@ export async function startServer(opts: ServerOpts) {
             return Response.json({
               ok: true,
               nightMode: setNightMode(currentSerial, mode as NightMode),
+            });
+          } catch (err) {
+            return Response.json(
+              { ok: false, error: err instanceof Error ? err.message : String(err) },
+              { status: 400 },
+            );
+          }
+        }
+        return new Response("method not allowed", { status: 405 });
+      }
+
+      if (url.pathname === "/api/font-scale") {
+        if (req.method === "GET") {
+          try {
+            return Response.json({ ok: true, fontScale: getFontScale(currentSerial) });
+          } catch (err) {
+            return Response.json(
+              { ok: false, error: err instanceof Error ? err.message : String(err) },
+              { status: 400 },
+            );
+          }
+        }
+        if (req.method === "POST") {
+          try {
+            const payload = await readJsonBody(req);
+            if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+              throw new Error("font scale payload must be an object");
+            }
+            const scale = Number((payload as Record<string, unknown>).scale);
+            if (!Number.isFinite(scale) || scale < 0.7 || scale > 2) {
+              throw new Error("scale must be a number between 0.7 and 2.0");
+            }
+            return Response.json({
+              ok: true,
+              fontScale: setFontScale(currentSerial, scale),
             });
           } catch (err) {
             return Response.json(
