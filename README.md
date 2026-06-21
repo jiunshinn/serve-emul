@@ -7,9 +7,12 @@ Host your Android emulator (or real device) for use with agent tools like Codex,
 https://github.com/user-attachments/assets/7dd6d57c-4270-4b13-a733-992b7085d944
 
 ```sh
-bunx serve-emu
+bunx serve-emu@latest
+# or: npx serve-emu@latest
 # → Preview at http://localhost:3300
 ```
+
+Use `@latest` for one-off runs so Bun/npm fetches the newest published version instead of reusing a cached or locally installed copy.
 
 `serve-emu` spawns the scrcpy server on the device, opens an adb forward tunnel, pipes H.264 frames over a WebSocket, and decodes them in the browser with WebCodecs. Input events flow back over the same socket to scrcpy's control channel.
 
