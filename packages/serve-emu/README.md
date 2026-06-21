@@ -46,7 +46,7 @@ Planned:
 
 ```sh
 bun install
-bun run --filter serve-emu setup    # downloads scrcpy-server-v3.1 (90KB) into vendor/
+bun run --filter serve-emu setup    # downloads scrcpy-server-v4.0 into vendor/
 bun run packages/serve-emu/src/cli.ts
 # → http://localhost:3300
 ```
@@ -163,7 +163,7 @@ curl -X POST http://localhost:3300/api/apps/grant \
 └──────────────────┘              └─────────────┘               └─────────┘
 ```
 
-1. The CLI pushes `scrcpy-server-v3.1` to `/data/local/tmp/scrcpy-server.jar`.
+1. The CLI pushes `scrcpy-server-v4.0` to `/data/local/tmp/scrcpy-server.jar`.
 2. It opens `adb forward tcp:<localPort> localabstract:scrcpy_<scid>`.
 3. It spawns `app_process` with the scrcpy server class on the device, then connects two sockets through the tunnel: video and control.
 4. The Bun server reads scrcpy's framed H.264 stream (12-byte header + Annex-B payload) and forwards each Access Unit as a binary WebSocket message. Raw `/ws` clients receive the Annex-B payload unchanged; the built-in browser UI opts into a 16-byte frame metadata header with keyframe and PTS data.

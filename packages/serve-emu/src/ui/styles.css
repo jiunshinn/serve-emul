@@ -39,6 +39,7 @@ main {
 .device {
   justify-self: center;
   position: relative;
+  max-width: 100%;
   background: #000;
   border-radius: 24px;
   overflow: hidden;
@@ -47,7 +48,7 @@ main {
 canvas {
   display: block;
   max-height: 80vh;
-  max-width: 90vw;
+  max-width: 100%;
   height: auto;
   cursor: default;
   user-select: none;
@@ -369,6 +370,20 @@ input[type="checkbox"] {
   color: #8a8a93;
   font-size: 12px;
   text-align: center;
+}
+.segmented-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.segmented-row button {
+  min-width: 0;
+  padding: 8px 6px;
+}
+.segmented-row button.selected {
+  border-color: #3f7d5c;
+  background: #173522;
+  color: #f2f2f7;
 }
 .foreground-card {
   display: grid;

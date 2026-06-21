@@ -6,9 +6,18 @@ type Device = {
   current: boolean;
 };
 
+type Orientation = "auto" | "portrait" | "landscape";
+type OrientationResponse = {
+  ok?: boolean;
+  orientation?: { orientation?: Orientation | "unknown"; raw?: string };
+  error?: string;
+};
+
 export function DevicePanel() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [status, setStatus] = useState("Loading...");
+  const [orientation, setOrientation] = useState<Orientation | "unknown">("unknown");
+  const [orientationStatus, setOrientationStatus] = useState("Loading...");
 
   const refresh = useCallback(async () => {
     try {
@@ -27,11 +36,54 @@ export function DevicePanel() {
     }
   }, []);
 
+  const refreshOrientation = useCallback(async () => {
+    try {
+      const res = await fetch("/api/orientation", { cache: "no-store" });
+      const json = await res.json() as OrientationResponse;
+      if (!json.ok || !json.orientation) {
+        setOrientation("unknown");
+        setOrientationStatus(json.error || "Unavailable");
+        return;
+      }
+      const next = json.orientation.orientation ?? "unknown";
+      setOrientation(next);
+      setOrientationStatus(next === "unknown" ? json.orientation.raw || "Unknown" : next);
+    } catch (err) {
+      setOrientation("unknown");
+      setOrientationStatus(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  const setDeviceOrientation = useCallback(async (next: Orientation) => {
+    setOrientationStatus("Applying...");
+    try {
+      const res = await fetch("/api/orientation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orientation: next }),
+      });
+      const json = await res.json() as OrientationResponse;
+      if (!json.ok || !json.orientation) {
+        setOrientationStatus(json.error || "Failed");
+        return;
+      }
+      const applied = json.orientation.orientation ?? "unknown";
+      setOrientation(applied);
+      setOrientationStatus(applied === "unknown" ? json.orientation.raw || "Unknown" : applied);
+    } catch (err) {
+      setOrientationStatus(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
   useEffect(() => {
     void refresh();
-    const timer = setInterval(refresh, 3000);
+    void refreshOrientation();
+    const timer = setInterval(() => {
+      void refresh();
+      void refreshOrientation();
+    }, 3000);
     return () => clearInterval(timer);
-  }, [refresh]);
+  }, [refresh, refreshOrientation]);
 
   return (
     <section className="tool-panel device-panel">
@@ -52,6 +104,30 @@ export function DevicePanel() {
         )}
       </div>
       <button onClick={() => void refresh()}>Refresh Devices</button>
+      <div className="panel-heading">
+        <h2>Orientation</h2>
+        <div className="location-status">{orientationStatus}</div>
+      </div>
+      <div className="segmented-row">
+        <button
+          className={orientation === "portrait" ? "selected" : ""}
+          onClick={() => void setDeviceOrientation("portrait")}
+        >
+          Portrait
+        </button>
+        <button
+          className={orientation === "landscape" ? "selected" : ""}
+          onClick={() => void setDeviceOrientation("landscape")}
+        >
+          Landscape
+        </button>
+        <button
+          className={orientation === "auto" ? "selected" : ""}
+          onClick={() => void setDeviceOrientation("auto")}
+        >
+          Auto
+        </button>
+      </div>
     </section>
   );
 }
