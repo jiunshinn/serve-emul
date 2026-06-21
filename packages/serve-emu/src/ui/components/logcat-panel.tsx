@@ -16,7 +16,15 @@ export function LogcatPanel() {
   const [packageName, setPackageName] = useState("");
   const [search, setSearch] = useState("");
   const [paused, setPaused] = useState(false);
-  const [status, setStatus] = useState("Disconnected");
+  const [enabled, setEnabled] = useState(false);
+  const [status, setStatus] = useState("Off");
+
+  const disconnect = () => {
+    eventSourceRef.current?.close();
+    eventSourceRef.current = null;
+    setEnabled(false);
+    setStatus("Off");
+  };
 
   const connect = () => {
     eventSourceRef.current?.close();
@@ -25,6 +33,7 @@ export function LogcatPanel() {
     if (search.trim()) params.set("search", search.trim());
     const source = new EventSource(`/api/logcat?${params}`);
     eventSourceRef.current = source;
+    setEnabled(true);
     setStatus("Connecting");
     source.addEventListener("ready", () => setStatus("Streaming"));
     source.addEventListener("log", (event) => {
@@ -40,9 +49,7 @@ export function LogcatPanel() {
   };
 
   useEffect(() => {
-    connect();
-    return () => eventSourceRef.current?.close();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return disconnect;
   }, []);
 
   useEffect(() => {
@@ -79,13 +86,14 @@ export function LogcatPanel() {
         </label>
       </div>
       <div className="panel-actions">
-        <button onClick={connect}>Apply</button>
+        <button onClick={connect}>{enabled ? "Apply" : "Start"}</button>
+        <button onClick={disconnect} disabled={!enabled}>Stop</button>
         <button onClick={() => setPaused((v) => !v)}>{paused ? "Resume" : "Pause"}</button>
         <button onClick={() => setLines([])}>Clear</button>
         <button onClick={() => void copyLogs()}>Copy</button>
       </div>
       <pre className="logcat-output">
-        {lines.length ? lines.map((entry) => entry.line).join("\n") : "Waiting for logcat..."}
+        {lines.length ? lines.map((entry) => entry.line).join("\n") : enabled ? "Waiting for logcat..." : "Logcat is off."}
       </pre>
     </section>
   );
