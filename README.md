@@ -171,6 +171,10 @@ curl -X POST http://localhost:3300/api/apps/grant \
 4. The Bun server reads scrcpy's framed H.264 stream (12-byte header + Annex-B payload) and forwards each Access Unit as a binary WebSocket message. Raw `/ws` clients receive the Annex-B payload unchanged; the built-in browser UI opts into a 16-byte frame metadata header with keyframe and PTS data.
 5. The browser configures a `VideoDecoder` from the SPS, uses server-provided frame metadata to avoid per-frame NAL scans, and draws frames to a `<canvas>`. Pointer events are normalized to device coordinates and written back to scrcpy's control socket as 32-byte touch packets.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, validation steps, scrcpy protocol notes, and pull request guidelines.
+
 ## License
 
 Apache-2.0. Bundles the upstream [scrcpy](https://github.com/Genymobile/scrcpy) server binary (Apache-2.0) at runtime.
