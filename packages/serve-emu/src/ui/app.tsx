@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { StatusBar } from "./components/status-bar";
 import { AppManagementPanel } from "./components/app-management-panel";
 import { AccessibilityPanel, type AccessibilityNode } from "./components/accessibility-panel";
-import { DevicePanel } from "./components/device-panel";
+import { DevicePanel, OrientationPanel } from "./components/device-panel";
 import { DeviceStream } from "./components/device-stream";
 import { ControlBar, type HardwareKey } from "./components/control-bar";
 import { LogcatPanel } from "./components/logcat-panel";
@@ -16,6 +16,7 @@ export function App() {
   const [accessibilityEnabled, setAccessibilityEnabled] = useState(false);
   const [accessibilityNodes, setAccessibilityNodes] = useState<AccessibilityNode[]>([]);
   const [highlightedAccessibilityId, setHighlightedAccessibilityId] = useState<string | null>(null);
+  const [devicesOpen, setDevicesOpen] = useState(true);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -44,7 +45,22 @@ export function App() {
   return (
     <>
       <StatusBar status={state.status} deviceSize={state.deviceSize} fps={state.fps} />
-      <main>
+      <main className={devicesOpen ? "app-layout devices-open" : "app-layout devices-collapsed"}>
+        <aside className="device-sidebar" aria-label="Devices sidebar">
+          <div className="device-sidebar-header">
+            <button
+              type="button"
+              className="sidebar-toggle"
+              onClick={() => setDevicesOpen((open) => !open)}
+              aria-label={devicesOpen ? "Collapse devices sidebar" : "Expand devices sidebar"}
+              title={devicesOpen ? "Collapse devices" : "Expand devices"}
+            >
+              <SidebarIcon collapsed={!devicesOpen} />
+            </button>
+            {devicesOpen ? <span>Devices</span> : null}
+          </div>
+          {devicesOpen ? <DevicePanel /> : null}
+        </aside>
         <div className="device">
           <DeviceStream
             canvasRef={canvasRef}
@@ -56,7 +72,7 @@ export function App() {
           />
         </div>
         <aside className="side-panel">
-          <DevicePanel />
+          <OrientationPanel />
           <AccessibilityPanel
             enabled={accessibilityEnabled}
             nodes={accessibilityNodes}
@@ -73,5 +89,20 @@ export function App() {
       </main>
       <ControlBar onPress={onPress} />
     </>
+  );
+}
+
+function SidebarIcon({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={collapsed ? "sidebar-icon collapsed" : "sidebar-icon"}
+      viewBox="0 0 20 20"
+      fill="none"
+    >
+      <rect x="3" y="3" width="14" height="14" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M8 3.75V16.25" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M12.5 7.5L10 10L12.5 12.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }

@@ -143,7 +143,7 @@ function findRunningAvd(name: string): RunningAvd | null {
   return listRunningAvds().find((running) => running.avd === name) ?? null;
 }
 
-function killEmulator(serial: string): void {
+export function stopEmulator(serial: string): void {
   const r = adb(serial, ["emu", "kill"]);
   if (r.status !== 0) {
     throw new Error(`Failed to stop ${serial}: ${r.stderr || r.stdout}`);
@@ -192,7 +192,7 @@ export async function startEmulator(opts: StartEmulatorOpts): Promise<EmulatorLa
     if (!opts.restartAvd) {
       return { serial: running.serial, proc: null, ownsProcess: false, stop: () => {} };
     }
-    killEmulator(running.serial);
+    stopEmulator(running.serial);
     await waitForEmulatorExit(running.serial);
   }
 

@@ -36,8 +36,64 @@ main {
   gap: 20px;
   padding: 24px;
 }
+.app-layout {
+  min-height: 0;
+  align-items: stretch;
+  transition: grid-template-columns 0.18s ease;
+}
+.app-layout.devices-open {
+  grid-template-columns: 300px minmax(0, 1fr) 380px;
+}
+.app-layout.devices-collapsed {
+  grid-template-columns: 46px minmax(0, 1fr) 380px;
+}
+.device-sidebar {
+  align-self: stretch;
+  min-height: 0;
+  max-height: calc(100vh - 140px);
+  overflow: hidden;
+  border-right: 1px solid #1f1f24;
+  padding-right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.device-sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  color: #b8b8c0;
+  font-size: 13px;
+  font-weight: 700;
+}
+.sidebar-toggle {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+  line-height: 1;
+}
+.sidebar-icon {
+  width: 18px;
+  height: 18px;
+  color: #b8b8c0;
+}
+.sidebar-icon.collapsed {
+  transform: scaleX(-1);
+}
+.devices-collapsed .device-sidebar {
+  align-items: center;
+  padding-right: 0;
+}
+.devices-collapsed .device-sidebar-header {
+  justify-content: center;
+}
 .device {
   justify-self: center;
+  align-self: center;
   position: relative;
   max-width: 100%;
   background: #000;
@@ -92,6 +148,10 @@ button {
 button:hover {
   background: #25252d;
 }
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
 input {
   box-sizing: border-box;
   width: 100%;
@@ -122,6 +182,15 @@ input[type="checkbox"] {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+.device-panel {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.device-sidebar .device-panel {
+  flex: 1;
 }
 .location-panel,
 .tool-panel {
@@ -336,6 +405,23 @@ input[type="checkbox"] {
   display: grid;
   gap: 6px;
 }
+.device-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.device-search button {
+  padding-inline: 10px;
+}
+.android-grid-list {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
+  padding-right: 2px;
+  align-content: start;
+  align-items: start;
+}
 .device-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -349,6 +435,66 @@ input[type="checkbox"] {
 .device-row.current {
   border-color: #3f7d5c;
   background: #132219;
+}
+.grid-device-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 58px;
+  padding: 8px;
+}
+.device-row-main {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.device-row-main:hover {
+  background: transparent;
+}
+.device-kind {
+  grid-row: 1 / 3;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: #1c1c22;
+  color: #8a8a93;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.device-kind::first-letter {
+  text-transform: uppercase;
+}
+.device-row .device-name {
+  color: #f2f2f7;
+  font-size: 12px;
+  font-weight: 600;
+}
+.device-subtitle {
+  color: #9a9aa3;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+}
+.device-row-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  align-items: flex-end;
+  justify-content: center;
+}
+.device-row-actions button {
+  min-width: 52px;
+  padding: 5px 8px;
+  font-size: 11px;
 }
 .device-row span {
   min-width: 0;
@@ -507,6 +653,26 @@ input[type="checkbox"] {
     grid-template-columns: 1fr;
     align-items: start;
     padding: 16px;
+  }
+  .app-layout.devices-open,
+  .app-layout.devices-collapsed {
+    grid-template-columns: 1fr;
+  }
+  .device-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid #1f1f24;
+    padding-right: 0;
+    padding-bottom: 16px;
+    width: min(100%, 520px);
+    max-height: 360px;
+    justify-self: center;
+  }
+  .devices-collapsed .device-sidebar {
+    max-height: none;
+    padding-bottom: 8px;
+  }
+  .devices-collapsed .device-sidebar-header {
+    flex-direction: row;
   }
   .side-panel {
     border-left: 0;
