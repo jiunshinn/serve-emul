@@ -37,7 +37,14 @@ type NightModeResponse = {
   error?: string;
 };
 
+type FontScaleResponse = {
+  ok?: boolean;
+  fontScale?: { scale?: number; raw?: string };
+  error?: string;
+};
+
 type BusyAction = "select" | "start" | "stop";
+const FONT_SCALE_PRESETS = [0.85, 1, 1.15, 1.3, 1.5] as const;
 
 export function DevicePanel() {
   const [devices, setDevices] = useState<GridDevice[]>([]);
@@ -314,6 +321,74 @@ export function NightModePanel() {
         >
           Auto
         </button>
+      </div>
+    </section>
+  );
+}
+
+export function FontScalePanel() {
+  const [fontScale, setFontScale] = useState<number | null>(null);
+  const [fontScaleStatus, setFontScaleStatus] = useState("Loading...");
+
+  const refreshFontScale = useCallback(async () => {
+    try {
+      const res = await fetch("/api/font-scale", { cache: "no-store" });
+      const json = await res.json() as FontScaleResponse;
+      if (!json.ok || !json.fontScale || typeof json.fontScale.scale !== "number") {
+        setFontScale(null);
+        setFontScaleStatus(json.error || "Unavailable");
+        return;
+      }
+      setFontScale(json.fontScale.scale);
+      setFontScaleStatus(`${Math.round(json.fontScale.scale * 100)}%`);
+    } catch (err) {
+      setFontScale(null);
+      setFontScaleStatus(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  const setDeviceFontScale = useCallback(async (next: number) => {
+    setFontScaleStatus("Applying...");
+    try {
+      const res = await fetch("/api/font-scale", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scale: next }),
+      });
+      const json = await res.json() as FontScaleResponse;
+      if (!json.ok || !json.fontScale || typeof json.fontScale.scale !== "number") {
+        setFontScaleStatus(json.error || "Failed");
+        return;
+      }
+      setFontScale(json.fontScale.scale);
+      setFontScaleStatus(`${Math.round(json.fontScale.scale * 100)}%`);
+    } catch (err) {
+      setFontScaleStatus(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshFontScale();
+    const timer = setInterval(() => void refreshFontScale(), 3000);
+    return () => clearInterval(timer);
+  }, [refreshFontScale]);
+
+  return (
+    <section className="tool-panel font-scale-panel">
+      <div className="panel-heading">
+        <h2>Font Size</h2>
+        <div className="location-status">{fontScaleStatus}</div>
+      </div>
+      <div className="font-scale-row">
+        {FONT_SCALE_PRESETS.map((scale) => (
+          <button
+            key={scale}
+            className={fontScale !== null && Math.abs(fontScale - scale) < 0.01 ? "selected" : ""}
+            onClick={() => void setDeviceFontScale(scale)}
+          >
+            {Math.round(scale * 100)}%
+          </button>
+        ))}
       </div>
     </section>
   );
