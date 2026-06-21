@@ -290,7 +290,26 @@ export function useStream(canvasRef: RefObject<HTMLCanvasElement>) {
         retryTimer = setTimeout(connect, retryIn);
       };
       ws.onmessage = (e) => {
-        if (typeof e.data === "string") return;
+        if (typeof e.data === "string") {
+          try {
+            const msg = JSON.parse(e.data) as { type?: string; size?: DeviceSize };
+            if (
+              msg.type === "video-session" &&
+              msg.size &&
+              Number.isFinite(msg.size.width) &&
+              Number.isFinite(msg.size.height)
+            ) {
+              closeDecoder();
+              clearFrameQueue();
+              frameIdx = 0;
+              sawKeyframe = false;
+              droppingUntilKeyframe = true;
+              setState((s) => ({ ...s, deviceSize: msg.size! }));
+              requestKeyframe();
+            }
+          } catch {}
+          return;
+        }
         feedFrame(e.data);
       };
     };
