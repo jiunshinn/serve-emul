@@ -2,7 +2,16 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import type { ServerWebSocket } from "bun";
-import { getUserRotation, listAllDevices, screencapPng, setUserRotation, type OrientationMode } from "./adb.ts";
+import {
+  getNightMode,
+  getUserRotation,
+  listAllDevices,
+  screencapPng,
+  setNightMode,
+  setUserRotation,
+  type NightMode,
+  type OrientationMode,
+} from "./adb.ts";
 import { getAccessibilitySnapshot } from "./accessibility.ts";
 import {
   clearAppData,
@@ -820,6 +829,41 @@ export async function startServer(opts: ServerOpts) {
             return Response.json({
               ok: true,
               orientation: setUserRotation(currentSerial, orientation as OrientationMode),
+            });
+          } catch (err) {
+            return Response.json(
+              { ok: false, error: err instanceof Error ? err.message : String(err) },
+              { status: 400 },
+            );
+          }
+        }
+        return new Response("method not allowed", { status: 405 });
+      }
+
+      if (url.pathname === "/api/night-mode") {
+        if (req.method === "GET") {
+          try {
+            return Response.json({ ok: true, nightMode: getNightMode(currentSerial) });
+          } catch (err) {
+            return Response.json(
+              { ok: false, error: err instanceof Error ? err.message : String(err) },
+              { status: 400 },
+            );
+          }
+        }
+        if (req.method === "POST") {
+          try {
+            const payload = await readJsonBody(req);
+            if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+              throw new Error("night mode payload must be an object");
+            }
+            const mode = (payload as Record<string, unknown>).mode;
+            if (mode !== "dark" && mode !== "light" && mode !== "auto") {
+              throw new Error("mode must be dark, light, or auto");
+            }
+            return Response.json({
+              ok: true,
+              nightMode: setNightMode(currentSerial, mode as NightMode),
             });
           } catch (err) {
             return Response.json(
