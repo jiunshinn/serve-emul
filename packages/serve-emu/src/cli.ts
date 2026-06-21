@@ -3,6 +3,8 @@ import { parseArgs } from "node:util";
 import { pickDevice } from "./adb.ts";
 import { listAvds, listRunningAvds, startEmulator } from "./emulator.ts";
 import { startServer } from "./server.ts";
+import { getUpdateNotice } from "./update-check.ts";
+import packageJson from "../package.json";
 
 const argv = Bun.argv.slice(2);
 const { values } = parseArgs({
@@ -31,6 +33,17 @@ function numberOption(name: string, fallback: number): number {
   const n = Number(value);
   if (!Number.isFinite(n)) throw new Error(`--${name} must be a number.`);
   return n;
+}
+
+async function checkForUpdate() {
+  if (process.env.SERVE_EMU_UPDATE_CHECK === "0") return;
+
+  const notice = await getUpdateNotice({
+    packageName: packageJson.name,
+    currentVersion: packageJson.version,
+    cachePath: process.env.SERVE_EMU_UPDATE_CHECK_CACHE,
+  });
+  if (notice) console.error(notice);
 }
 
 if (values.help) {
@@ -66,6 +79,8 @@ Options:
 }
 
 async function main() {
+  await checkForUpdate().catch(() => {});
+
   if (values["avd-list"]) {
     console.log(listAvds(values.emulator).join("\n"));
     return;
