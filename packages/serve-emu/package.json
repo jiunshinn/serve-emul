@@ -1,6 +1,6 @@
 {
   "name": "serve-emu",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "The `npx serve` of Android devices — stream a booted emulator or attached device over a WebSocket H.264 feed decoded in the browser with WebCodecs.",
   "license": "Apache-2.0",
   "type": "module",
@@ -38,15 +38,19 @@
     "start": "bun run src/cli.ts",
     "build:ui": "vite build",
     "build": "bun run build:ui",
+    "test": "bun test",
+    "check": "bun run test && bun run typecheck && bun run typecheck:ui && bun run build",
+    "release": "bun run scripts/release.ts",
     "typecheck": "tsc --noEmit",
     "typecheck:ui": "tsc -p src/ui --noEmit",
-    "prepublishOnly": "bun run build"
+    "prepublishOnly": "bun run check"
   },
   "files": [
     "src",
     "scripts",
     "vendor",
     "dist/ui",
+    "CHANGELOG.md",
     "README.md",
     "LICENSE"
   ],

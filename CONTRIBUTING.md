@@ -141,6 +141,44 @@ git add "path/to/file1" "path/to/file2"
 git commit -m "<scoped message>" -- path/to/file1 path/to/file2
 ```
 
+## Release Guidelines
+
+`serve-emu` uses the package version in `packages/serve-emu/package.json` as the
+source of truth. Release tags should be named `v<version>`, for example
+`v0.1.0`.
+
+Choose the version bump with semver:
+
+- `patch` for fixes and small internal improvements
+- `minor` for backwards-compatible user-facing features or APIs
+- `major` for breaking CLI, HTTP API, WebSocket protocol, package, or runtime behavior
+
+Prepare a release:
+
+```sh
+bun run release -- patch
+```
+
+You can also pass `minor`, `major`, or an exact version such as `0.1.0`.
+
+Before publishing, review `packages/serve-emu/CHANGELOG.md`, then run:
+
+```sh
+bun run check
+```
+
+That runs the package tests, server typecheck, UI typecheck, and production UI
+build.
+
+Commit only the version and changelog files, then tag and publish:
+
+```sh
+git commit -m "Release v<version>" -- packages/serve-emu/package.json packages/serve-emu/CHANGELOG.md
+git tag v<version>
+npm publish packages/serve-emu
+git push origin HEAD --tags
+```
+
 ## Reporting Issues
 
 When reporting a bug, include:
