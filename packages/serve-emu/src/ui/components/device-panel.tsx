@@ -43,6 +43,16 @@ type FontScaleResponse = {
   error?: string;
 };
 
+type NetworkResponse = {
+  ok?: boolean;
+  network?: {
+    enabled?: boolean | null;
+    wifi?: "enabled" | "disabled" | "unknown";
+    mobileData?: "enabled" | "disabled" | "unknown";
+  };
+  error?: string;
+};
+
 type BusyAction = "select" | "start" | "stop";
 const FONT_SCALE_PRESETS = [0.85, 1, 1.15, 1.3, 1.5] as const;
 
@@ -389,6 +399,85 @@ export function FontScalePanel() {
             {Math.round(scale * 100)}%
           </button>
         ))}
+      </div>
+    </section>
+  );
+}
+
+function networkLabel(network: NonNullable<NetworkResponse["network"]>): string {
+  const state = network.enabled === true ? "on" : network.enabled === false ? "off" : "unknown";
+  const wifi = network.wifi && network.wifi !== "unknown" ? `wifi ${network.wifi}` : "wifi ?";
+  const mobileData =
+    network.mobileData && network.mobileData !== "unknown" ? `data ${network.mobileData}` : "data ?";
+  return `${state} (${wifi}, ${mobileData})`;
+}
+
+export function NetworkPanel() {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [networkStatus, setNetworkStatus] = useState("Loading...");
+
+  const refreshNetwork = useCallback(async () => {
+    try {
+      const res = await fetch("/api/network", { cache: "no-store" });
+      const json = await res.json() as NetworkResponse;
+      if (!json.ok || !json.network) {
+        setEnabled(null);
+        setNetworkStatus(json.error || "Unavailable");
+        return;
+      }
+      setEnabled(json.network.enabled ?? null);
+      setNetworkStatus(networkLabel(json.network));
+    } catch (err) {
+      setEnabled(null);
+      setNetworkStatus(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  const setDeviceNetwork = useCallback(async (next: boolean) => {
+    setNetworkStatus("Applying...");
+    try {
+      const res = await fetch("/api/network", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: next }),
+      });
+      const json = await res.json() as NetworkResponse;
+      if (!json.ok || !json.network) {
+        setNetworkStatus(json.error || "Failed");
+        return;
+      }
+      setEnabled(json.network.enabled ?? null);
+      setNetworkStatus(networkLabel(json.network));
+    } catch (err) {
+      setNetworkStatus(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshNetwork();
+    const timer = setInterval(() => void refreshNetwork(), 5000);
+    return () => clearInterval(timer);
+  }, [refreshNetwork]);
+
+  return (
+    <section className="tool-panel network-panel">
+      <div className="panel-heading">
+        <h2>Network</h2>
+        <div className="location-status">{networkStatus}</div>
+      </div>
+      <div className="segmented-row network-row">
+        <button
+          className={enabled === true ? "selected" : ""}
+          onClick={() => void setDeviceNetwork(true)}
+        >
+          On
+        </button>
+        <button
+          className={enabled === false ? "selected" : ""}
+          onClick={() => void setDeviceNetwork(false)}
+        >
+          Off
+        </button>
       </div>
     </section>
   );
