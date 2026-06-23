@@ -1,5 +1,9 @@
 import { spawn, spawnSync } from "node:child_process";
 
+const ADB_QUERY_TIMEOUT_MS = 2_000;
+const ADB_MUTATION_TIMEOUT_MS = 5_000;
+const ADB_SCREENSHOT_TIMEOUT_MS = 8_000;
+
 export type Device = { serial: string; state: string };
 export type OrientationMode = "auto" | "portrait" | "landscape";
 export type NightMode = "auto" | "dark" | "light";
@@ -29,7 +33,7 @@ export type NetworkStatus = {
 };
 
 export function listAllDevices(): Device[] {
-  const r = spawnSync("adb", ["devices"], { encoding: "utf8" });
+  const r = spawnSync("adb", ["devices"], { encoding: "utf8", timeout: ADB_QUERY_TIMEOUT_MS });
   if (r.status !== 0) throw new Error(`adb devices failed: ${r.stderr}`);
   return r.stdout
     .split("\n")
@@ -61,13 +65,17 @@ export function screencapPng(serial: string): Buffer {
   const r = spawnSync("adb", ["-s", serial, "exec-out", "screencap", "-p"], {
     encoding: "buffer",
     maxBuffer: 64 * 1024 * 1024,
+    timeout: ADB_SCREENSHOT_TIMEOUT_MS,
   });
   if (r.status !== 0) throw new Error(`screencap failed: ${r.stderr.toString()}`);
   return r.stdout;
 }
 
 export function shell(serial: string, cmd: string[]): void {
-  const r = spawnSync("adb", ["-s", serial, "shell", ...cmd], { encoding: "utf8" });
+  const r = spawnSync("adb", ["-s", serial, "shell", ...cmd], {
+    encoding: "utf8",
+    timeout: ADB_MUTATION_TIMEOUT_MS,
+  });
   if (r.status !== 0) throw new Error(`adb shell ${cmd.join(" ")} failed: ${r.stderr}`);
 }
 
@@ -76,7 +84,10 @@ export function shellSpawn(serial: string, cmd: string[]) {
 }
 
 export function getDeviceSize(serial: string): { width: number; height: number } {
-  const r = spawnSync("adb", ["-s", serial, "shell", "wm", "size"], { encoding: "utf8" });
+  const r = spawnSync("adb", ["-s", serial, "shell", "wm", "size"], {
+    encoding: "utf8",
+    timeout: ADB_QUERY_TIMEOUT_MS,
+  });
   if (r.status !== 0) throw new Error(`wm size failed: ${r.stderr}`);
   const m = r.stdout.match(/(\d+)x(\d+)/);
   if (!m) throw new Error(`Could not parse wm size output: ${r.stdout}`);
@@ -93,6 +104,7 @@ function orientationFromRotation(mode: "free" | "lock" | "unknown", rotation: nu
 export function getUserRotation(serial: string): OrientationStatus {
   const r = spawnSync("adb", ["-s", serial, "shell", "cmd", "window", "user-rotation"], {
     encoding: "utf8",
+    timeout: ADB_QUERY_TIMEOUT_MS,
   });
   if (r.status !== 0) throw new Error(`cmd window user-rotation failed: ${r.stderr}`);
   const raw = r.stdout.trim();
@@ -110,7 +122,10 @@ export function setUserRotation(serial: string, orientation: OrientationMode): O
     orientation === "auto"
       ? ["cmd", "window", "user-rotation", "free"]
       : ["cmd", "window", "user-rotation", "lock", orientation === "portrait" ? "0" : "1"];
-  const r = spawnSync("adb", ["-s", serial, "shell", ...args], { encoding: "utf8" });
+  const r = spawnSync("adb", ["-s", serial, "shell", ...args], {
+    encoding: "utf8",
+    timeout: ADB_MUTATION_TIMEOUT_MS,
+  });
   if (r.status !== 0) throw new Error(`adb shell ${args.join(" ")} failed: ${r.stderr}`);
   return getUserRotation(serial);
 }
@@ -118,6 +133,7 @@ export function setUserRotation(serial: string, orientation: OrientationMode): O
 export function getFontScale(serial: string): FontScaleStatus {
   const r = spawnSync("adb", ["-s", serial, "shell", "settings", "get", "system", "font_scale"], {
     encoding: "utf8",
+    timeout: ADB_QUERY_TIMEOUT_MS,
   });
   if (r.status !== 0) throw new Error(`settings get system font_scale failed: ${r.stderr}`);
   const raw = r.stdout.trim();
@@ -134,7 +150,10 @@ export function setFontScale(serial: string, scale: number): FontScaleStatus {
   }
   const normalized = scale.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
   const args = ["settings", "put", "system", "font_scale", normalized];
-  const r = spawnSync("adb", ["-s", serial, "shell", ...args], { encoding: "utf8" });
+  const r = spawnSync("adb", ["-s", serial, "shell", ...args], {
+    encoding: "utf8",
+    timeout: ADB_MUTATION_TIMEOUT_MS,
+  });
   if (r.status !== 0) throw new Error(`adb shell ${args.join(" ")} failed: ${r.stderr}`);
   return getFontScale(serial);
 }
@@ -151,6 +170,7 @@ function nightModeFromRaw(raw: string): NightMode | "unknown" {
 export function getNightMode(serial: string): NightModeStatus {
   const r = spawnSync("adb", ["-s", serial, "shell", "cmd", "uimode", "night"], {
     encoding: "utf8",
+    timeout: ADB_QUERY_TIMEOUT_MS,
   });
   if (r.status !== 0) throw new Error(`cmd uimode night failed: ${r.stderr}`);
   const raw = r.stdout.trim();
@@ -160,7 +180,10 @@ export function getNightMode(serial: string): NightModeStatus {
 export function setNightMode(serial: string, mode: NightMode): NightModeStatus {
   const value = mode === "dark" ? "yes" : mode === "light" ? "no" : "auto";
   const args = ["cmd", "uimode", "night", value];
-  const r = spawnSync("adb", ["-s", serial, "shell", ...args], { encoding: "utf8" });
+  const r = spawnSync("adb", ["-s", serial, "shell", ...args], {
+    encoding: "utf8",
+    timeout: ADB_MUTATION_TIMEOUT_MS,
+  });
   if (r.status !== 0) throw new Error(`adb shell ${args.join(" ")} failed: ${r.stderr}`);
   return getNightMode(serial);
 }
@@ -168,6 +191,7 @@ export function setNightMode(serial: string, mode: NightMode): NightModeStatus {
 function globalSetting(serial: string, name: string): string {
   const r = spawnSync("adb", ["-s", serial, "shell", "settings", "get", "global", name], {
     encoding: "utf8",
+    timeout: ADB_QUERY_TIMEOUT_MS,
   });
   if (r.status !== 0) throw new Error(`settings get global ${name} failed: ${r.stderr}`);
   return r.stdout.trim();
@@ -202,7 +226,10 @@ export function setNetworkEnabled(serial: string, enabled: boolean): NetworkStat
   const action = enabled ? "enable" : "disable";
   for (const service of ["wifi", "data"]) {
     const args = ["svc", service, action];
-    const r = spawnSync("adb", ["-s", serial, "shell", ...args], { encoding: "utf8" });
+    const r = spawnSync("adb", ["-s", serial, "shell", ...args], {
+      encoding: "utf8",
+      timeout: ADB_MUTATION_TIMEOUT_MS,
+    });
     if (r.status !== 0) throw new Error(`adb shell ${args.join(" ")} failed: ${r.stderr}`);
   }
   return getNetworkStatus(serial);
