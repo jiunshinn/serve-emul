@@ -17,6 +17,16 @@ export type NightModeStatus = {
   mode: NightMode | "unknown";
   raw: string;
 };
+export type NetworkRadioStatus = "enabled" | "disabled" | "unknown";
+export type NetworkStatus = {
+  enabled: boolean | null;
+  wifi: NetworkRadioStatus;
+  mobileData: NetworkRadioStatus;
+  raw: {
+    wifi: string;
+    mobileData: string;
+  };
+};
 
 export function listAllDevices(): Device[] {
   const r = spawnSync("adb", ["devices"], { encoding: "utf8" });
@@ -153,4 +163,47 @@ export function setNightMode(serial: string, mode: NightMode): NightModeStatus {
   const r = spawnSync("adb", ["-s", serial, "shell", ...args], { encoding: "utf8" });
   if (r.status !== 0) throw new Error(`adb shell ${args.join(" ")} failed: ${r.stderr}`);
   return getNightMode(serial);
+}
+
+function globalSetting(serial: string, name: string): string {
+  const r = spawnSync("adb", ["-s", serial, "shell", "settings", "get", "global", name], {
+    encoding: "utf8",
+  });
+  if (r.status !== 0) throw new Error(`settings get global ${name} failed: ${r.stderr}`);
+  return r.stdout.trim();
+}
+
+function radioStatusFromSetting(raw: string): NetworkRadioStatus {
+  if (raw === "1") return "enabled";
+  if (raw === "0") return "disabled";
+  return "unknown";
+}
+
+export function getNetworkStatus(serial: string): NetworkStatus {
+  const wifiRaw = globalSetting(serial, "wifi_on");
+  const mobileDataRaw = globalSetting(serial, "mobile_data");
+  const wifi = radioStatusFromSetting(wifiRaw);
+  const mobileData = radioStatusFromSetting(mobileDataRaw);
+  const radios = [wifi, mobileData];
+  const knownRadios = radios.filter((radio) => radio !== "unknown");
+  const enabled = knownRadios.length === 0 ? null : knownRadios.some((radio) => radio === "enabled");
+  return {
+    enabled,
+    wifi,
+    mobileData,
+    raw: {
+      wifi: wifiRaw,
+      mobileData: mobileDataRaw,
+    },
+  };
+}
+
+export function setNetworkEnabled(serial: string, enabled: boolean): NetworkStatus {
+  const action = enabled ? "enable" : "disable";
+  for (const service of ["wifi", "data"]) {
+    const args = ["svc", service, action];
+    const r = spawnSync("adb", ["-s", serial, "shell", ...args], { encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`adb shell ${args.join(" ")} failed: ${r.stderr}`);
+  }
+  return getNetworkStatus(serial);
 }

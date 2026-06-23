@@ -4,11 +4,13 @@ import { spawn, spawnSync } from "node:child_process";
 import type { ServerWebSocket } from "bun";
 import {
   getFontScale,
+  getNetworkStatus,
   getNightMode,
   getUserRotation,
   listAllDevices,
   screencapPng,
   setFontScale,
+  setNetworkEnabled,
   setNightMode,
   setUserRotation,
   type NightMode,
@@ -901,6 +903,41 @@ export async function startServer(opts: ServerOpts) {
             return Response.json({
               ok: true,
               fontScale: setFontScale(currentSerial, scale),
+            });
+          } catch (err) {
+            return Response.json(
+              { ok: false, error: err instanceof Error ? err.message : String(err) },
+              { status: 400 },
+            );
+          }
+        }
+        return new Response("method not allowed", { status: 405 });
+      }
+
+      if (url.pathname === "/api/network") {
+        if (req.method === "GET") {
+          try {
+            return Response.json({ ok: true, network: getNetworkStatus(currentSerial) });
+          } catch (err) {
+            return Response.json(
+              { ok: false, error: err instanceof Error ? err.message : String(err) },
+              { status: 400 },
+            );
+          }
+        }
+        if (req.method === "POST") {
+          try {
+            const payload = await readJsonBody(req);
+            if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+              throw new Error("network payload must be an object");
+            }
+            const enabled = (payload as Record<string, unknown>).enabled;
+            if (typeof enabled !== "boolean") {
+              throw new Error("enabled must be a boolean");
+            }
+            return Response.json({
+              ok: true,
+              network: setNetworkEnabled(currentSerial, enabled),
             });
           } catch (err) {
             return Response.json(

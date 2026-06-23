@@ -531,6 +531,9 @@ input[type="checkbox"] {
   background: #173522;
   color: #f2f2f7;
 }
+.network-row {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
 .font-scale-row {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
