@@ -1,7 +1,8 @@
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import type { ServerWebSocket } from "bun";
+import { execText } from "./exec.ts";
 import {
   getFontScale,
   getNetworkStatus,
@@ -87,7 +88,7 @@ const FRAME_META_MAGIC = 0x53454d55; // "SEMU"
 const FRAME_META_VERSION = 1;
 const FRAME_META_HEADER_BYTES = 16;
 const FRAME_FLAG_KEY = 1 << 0;
-const VIDEO_RESET_COOLDOWN_MS = 1500;
+const VIDEO_RESET_COOLDOWN_MS = 500;
 const FIRST_FRAME_RESET_MS = 5000;
 const AWAITING_KEYFRAME_RESET_MS = 2500;
 const MAX_JSON_BODY_BYTES = 8 * 1024;
@@ -183,9 +184,12 @@ export async function startServer(opts: ServerOpts) {
     clients.clear();
   };
 
-  const deviceGrid = (): DeviceGridResponse => {
-    const adbDevices = listAllDevices();
-    const runningAvds = listRunningAvds();
+  const deviceGrid = async (): Promise<DeviceGridResponse> => {
+    const [adbDevices, runningAvds, avds] = await Promise.all([
+      listAllDevices(),
+      listRunningAvds(),
+      listAvds(),
+    ]);
     const runningBySerial = new Map(runningAvds.map((running) => [running.serial, running]));
     const runningByAvd = new Map(runningAvds.map((running) => [running.avd, running]));
     const rows: GridDevice[] = adbDevices.map((device) => {
@@ -206,7 +210,7 @@ export async function startServer(opts: ServerOpts) {
     });
 
     const knownAvdSerials = new Set(runningAvds.map((running) => running.serial));
-    for (const avd of listAvds()) {
+    for (const avd of avds) {
       const running = runningByAvd.get(avd);
       if (running && knownAvdSerials.has(running.serial)) continue;
       rows.push({
@@ -310,10 +314,9 @@ export async function startServer(opts: ServerOpts) {
     return lastLocation;
   };
 
-  const resolvePackagePids = (packageName: string): Set<string> => {
+  const resolvePackagePids = async (packageName: string): Promise<Set<string>> => {
     if (!/^[A-Za-z0-9_.:-]+$/.test(packageName)) return new Set();
-    const r = spawnSync("adb", ["-s", currentSerial, "shell", "pidof", packageName], {
-      encoding: "utf8",
+    const r = await execText("adb", ["-s", currentSerial, "shell", "pidof", packageName], {
       timeout: 2_000,
     });
     if (r.status !== 0) return new Set();
@@ -325,7 +328,7 @@ export async function startServer(opts: ServerOpts) {
     const search = (url.searchParams.get("search") ?? "").trim().slice(0, MAX_LOGCAT_QUERY_BYTES).toLowerCase();
     const proc = spawn("adb", ["-s", currentSerial, "logcat", "-v", "threadtime"]);
     const encoder = new TextEncoder();
-    let pidSet = packageName ? resolvePackagePids(packageName) : new Set<string>();
+    let pidSet = new Set<string>();
     let pidTimer: ReturnType<typeof setInterval> | null = null;
     let buffer = "";
 
@@ -361,8 +364,13 @@ export async function startServer(opts: ServerOpts) {
           search: search || null,
         });
         if (packageName) {
+          void resolvePackagePids(packageName).then((set) => {
+            pidSet = set;
+          });
           pidTimer = setInterval(() => {
-            pidSet = resolvePackagePids(packageName);
+            void resolvePackagePids(packageName).then((set) => {
+              pidSet = set;
+            });
           }, 5_000);
         }
         proc.stdout.on("data", consume);
@@ -443,14 +451,14 @@ export async function startServer(opts: ServerOpts) {
 
   const appJsonEndpoint = async (
     req: Request,
-    action: (payload: Record<string, unknown>) => unknown,
+    action: (payload: Record<string, unknown>) => unknown | Promise<unknown>,
   ) => {
     try {
       const payload = await readJsonBody(req);
       if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
         throw new Error("payload must be an object");
       }
-      const result = action(payload as Record<string, unknown>);
+      const result = await action(payload as Record<string, unknown>);
       return Response.json(result);
     } catch (err) {
       return Response.json(
@@ -645,7 +653,7 @@ export async function startServer(opts: ServerOpts) {
     if (serial === currentSerial && status === "streaming") {
       return { ok: true, serial: currentSerial, device: session.meta.deviceName };
     }
-    const device = listAllDevices().find((candidate) => candidate.serial === serial);
+    const device = (await listAllDevices()).find((candidate) => candidate.serial === serial);
     if (!device) throw new Error(`Unknown adb device "${serial}".`);
     if (device.state !== "device") throw new Error(`${serial} is ${device.state}, not ready.`);
 
@@ -723,7 +731,7 @@ export async function startServer(opts: ServerOpts) {
           return Response.json({
             ok: true,
             currentSerial,
-            devices: listAllDevices().map((device) => ({
+            devices: (await listAllDevices()).map((device) => ({
               ...device,
               current: device.serial === currentSerial,
             })),
@@ -739,7 +747,7 @@ export async function startServer(opts: ServerOpts) {
       if (url.pathname === "/api/device-grid") {
         if (req.method !== "GET") return new Response("method not allowed", { status: 405 });
         try {
-          return Response.json(deviceGrid());
+          return Response.json(await deviceGrid());
         } catch (err) {
           return Response.json(
             { ok: false, error: err instanceof Error ? err.message : String(err) },
@@ -802,12 +810,12 @@ export async function startServer(opts: ServerOpts) {
           const body = payload as Record<string, unknown>;
           let serial = typeof body.serial === "string" ? body.serial.trim() : "";
           if (!serial && typeof body.avd === "string" && body.avd.trim()) {
-            serial = listRunningAvds().find((running) => running.avd === body.avd)?.serial ?? "";
+            serial = (await listRunningAvds()).find((running) => running.avd === body.avd)?.serial ?? "";
           }
           if (!serial) throw new Error("serial or running avd is required");
           if (!/^emulator-\d+$/.test(serial)) throw new Error(`${serial} is not an emulator`);
           if (serial === currentSerial) stopCurrentSession("current emulator stopped");
-          stopEmulator(serial);
+          await stopEmulator(serial);
           return Response.json({ ok: true, serial });
         } catch (err) {
           return Response.json(
@@ -820,7 +828,7 @@ export async function startServer(opts: ServerOpts) {
       if (url.pathname === "/api/orientation") {
         if (req.method === "GET") {
           try {
-            return Response.json({ ok: true, orientation: getUserRotation(currentSerial) });
+            return Response.json({ ok: true, orientation: await getUserRotation(currentSerial) });
           } catch (err) {
             return Response.json(
               { ok: false, error: err instanceof Error ? err.message : String(err) },
@@ -840,7 +848,7 @@ export async function startServer(opts: ServerOpts) {
             }
             return Response.json({
               ok: true,
-              orientation: setUserRotation(currentSerial, orientation as OrientationMode),
+              orientation: await setUserRotation(currentSerial, orientation as OrientationMode),
             });
           } catch (err) {
             return Response.json(
@@ -855,7 +863,7 @@ export async function startServer(opts: ServerOpts) {
       if (url.pathname === "/api/night-mode") {
         if (req.method === "GET") {
           try {
-            return Response.json({ ok: true, nightMode: getNightMode(currentSerial) });
+            return Response.json({ ok: true, nightMode: await getNightMode(currentSerial) });
           } catch (err) {
             return Response.json(
               { ok: false, error: err instanceof Error ? err.message : String(err) },
@@ -875,7 +883,7 @@ export async function startServer(opts: ServerOpts) {
             }
             return Response.json({
               ok: true,
-              nightMode: setNightMode(currentSerial, mode as NightMode),
+              nightMode: await setNightMode(currentSerial, mode as NightMode),
             });
           } catch (err) {
             return Response.json(
@@ -890,7 +898,7 @@ export async function startServer(opts: ServerOpts) {
       if (url.pathname === "/api/font-scale") {
         if (req.method === "GET") {
           try {
-            return Response.json({ ok: true, fontScale: getFontScale(currentSerial) });
+            return Response.json({ ok: true, fontScale: await getFontScale(currentSerial) });
           } catch (err) {
             return Response.json(
               { ok: false, error: err instanceof Error ? err.message : String(err) },
@@ -910,7 +918,7 @@ export async function startServer(opts: ServerOpts) {
             }
             return Response.json({
               ok: true,
-              fontScale: setFontScale(currentSerial, scale),
+              fontScale: await setFontScale(currentSerial, scale),
             });
           } catch (err) {
             return Response.json(
@@ -925,7 +933,7 @@ export async function startServer(opts: ServerOpts) {
       if (url.pathname === "/api/network") {
         if (req.method === "GET") {
           try {
-            return Response.json({ ok: true, network: getNetworkStatus(currentSerial) });
+            return Response.json({ ok: true, network: await getNetworkStatus(currentSerial) });
           } catch (err) {
             return Response.json(
               { ok: false, error: err instanceof Error ? err.message : String(err) },
@@ -945,7 +953,7 @@ export async function startServer(opts: ServerOpts) {
             }
             return Response.json({
               ok: true,
-              network: setNetworkEnabled(currentSerial, enabled),
+              network: await setNetworkEnabled(currentSerial, enabled),
             });
           } catch (err) {
             return Response.json(
@@ -971,7 +979,7 @@ export async function startServer(opts: ServerOpts) {
           return new Response("method not allowed", { status: 405 });
         }
         try {
-          const png = screencapPng(currentSerial);
+          const png = await screencapPng(currentSerial);
           if (url.searchParams.get("format") === "base64") {
             return Response.json({
               ok: true,
@@ -991,7 +999,7 @@ export async function startServer(opts: ServerOpts) {
       if (url.pathname === "/api/foreground") {
         if (req.method !== "GET") return new Response("method not allowed", { status: 405 });
         try {
-          return Response.json({ ok: true, app: getForegroundApp(currentSerial) });
+          return Response.json({ ok: true, app: await getForegroundApp(currentSerial) });
         } catch (err) {
           return Response.json(
             { ok: false, error: err instanceof Error ? err.message : String(err) },
@@ -1003,7 +1011,7 @@ export async function startServer(opts: ServerOpts) {
       if (url.pathname === "/api/accessibility") {
         if (req.method !== "GET") return new Response("method not allowed", { status: 405 });
         try {
-          return Response.json(getAccessibilitySnapshot(currentSerial));
+          return Response.json(await getAccessibilitySnapshot(currentSerial));
         } catch (err) {
           return Response.json(
             { ok: false, error: err instanceof Error ? err.message : String(err) },

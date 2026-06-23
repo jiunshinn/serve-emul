@@ -73,7 +73,7 @@ bun run packages/serve-emul/src/cli.ts
 
 ```text
 serve-emul [-p <port>] [-s <serial>] [--max-fps N] [--bit-rate N] [--max-size N] [--key-frame-interval sec]
-serve-emul --avd <name> [--restart-avd]
+serve-emul --avd <name> [--gpu <mode>] [--restart-avd]
 serve-emul --avd-list
 serve-emul --running-avds
 ```
@@ -87,6 +87,7 @@ serve-emul --running-avds
 | `--max-size` | `1920` | Downscale the longest edge to N pixels; `0` keeps native size |
 | `--key-frame-interval` | `1` | Ask the encoder for regular keyframes; `0` disables this codec option |
 | `--avd` | none | Launch this Android Virtual Device before streaming |
+| `--gpu` | `host` | Emulator GPU mode for `--avd` launches. `host` renders on the real GPU for smooth ~60fps; see [Smooth Emulator Playback](#smooth-emulator-playback) |
 | `--restart-avd` | false | Stop a running matching AVD before launching it |
 | `--avd-list` | false | List available Android Virtual Device names |
 | `--running-avds` | false | List currently running emulator serials and AVD names |
@@ -94,6 +95,28 @@ serve-emul --running-avds
 | `--emulator-port` | auto | Emulator console port for `--avd`; must be an even port from 5554 through 5682 |
 
 By default, `serve-emul` attaches to the only online device. If more than one device is online, pass `-s <serial>` or select another running device later through the HTTP API/UI.
+
+## Smooth Emulator Playback
+
+The single biggest factor for stutter-free emulator streaming is the **emulator GPU mode**, not the bit rate or the transport. Many AVDs default to `auto`, which on some hosts (notably Apple Silicon) falls back to a **software Vulkan compositor** (`llvmpipe`/`lavapipe`). That caps the guest at a janky ~20fps with dropped frames, so the stream stutters no matter how high you set `--max-fps` or `--bit-rate`.
+
+`serve-emul` launches `--avd` emulators with **`-gpu host`** by default, which renders on the real GPU (Metal/Vulkan) for smooth ~60fps playback (measured: guest jank dropped from 10–19% to 0%). Override with `--gpu <mode>` when needed:
+
+```sh
+# default — real GPU, smooth
+serve-emul --avd Pixel_8
+
+# headless host without a usable GPU
+serve-emul --avd Pixel_8 --gpu swiftshader_indirect
+```
+
+If you start the emulator yourself (or attach to a pre-booted one with `-s`), `serve-emul` can't set its GPU mode — launch it with `-gpu host` directly:
+
+```sh
+emulator @Pixel_8 -gpu host
+```
+
+You can confirm the mode in the emulator log (`vulkan_mode_selected:host` = good; `lavapipe`/`llvmpipe` = software fallback) or via `adb shell dumpsys gfxinfo <pkg>` (look for a low "Janky frames" percentage while scrolling). For an extra fps margin, lower `--max-size` to stream at a smaller resolution.
 
 ## Browser UI
 

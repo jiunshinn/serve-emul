@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { execText } from "./exec.ts";
 
 export type AccessibilityNode = {
   id: string;
@@ -50,11 +50,10 @@ function boolAttr(value: string | undefined): boolean {
   return value === "true";
 }
 
-function dumpXml(serial: string): string {
+async function dumpXml(serial: string): Promise<string> {
   const path = `/sdcard/window-${Date.now()}.xml`;
   const command = `uiautomator dump ${path} >/dev/null && cat ${path} && rm ${path}`;
-  const result = spawnSync("adb", ["-s", serial, "shell", "sh", "-c", command], {
-    encoding: "utf8",
+  const result = await execText("adb", ["-s", serial, "shell", "sh", "-c", command], {
     maxBuffer: 16 * 1024 * 1024,
     timeout: 8_000,
   });
@@ -64,8 +63,8 @@ function dumpXml(serial: string): string {
   return result.stdout;
 }
 
-export function getAccessibilitySnapshot(serial: string): AccessibilitySnapshot {
-  const xml = dumpXml(serial);
+export async function getAccessibilitySnapshot(serial: string): Promise<AccessibilitySnapshot> {
+  const xml = await dumpXml(serial);
   const nodes: AccessibilityNode[] = [];
   let index = 0;
   for (const match of xml.matchAll(/<node\b[^>]*>/g)) {

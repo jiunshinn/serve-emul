@@ -19,10 +19,14 @@ type ApiInfo = {
   lastError?: string | null;
 };
 
-const SOFT_DECODE_QUEUE_SIZE = 4;
-const DECODER_RECOVERY_COOLDOWN_MS = 1500;
-const KEYFRAME_REQUEST_COOLDOWN_MS = 1500;
-const FRAME_QUEUE_SIZE = 2;
+// How deep the decoder's pending queue may grow before we jump to a keyframe to
+// shed latency. Hardware decoders keep a multi-frame pipeline, so a small value
+// like 4 trips on every transient hiccup; 12 (~200ms at 60fps) tolerates spikes
+// while still bounding latency.
+const SOFT_DECODE_QUEUE_SIZE = 12;
+const DECODER_RECOVERY_COOLDOWN_MS = 500;
+const KEYFRAME_REQUEST_COOLDOWN_MS = 400;
+const FRAME_QUEUE_SIZE = 3;
 const FRAME_META_MAGIC = 0x53454d55; // "SEMU"
 const FRAME_META_VERSION = 1;
 const FRAME_META_HEADER_BYTES = 16;
@@ -113,6 +117,21 @@ export function useStream(canvasRef: RefObject<HTMLCanvasElement>) {
       decoder = null;
     };
 
+    // Soft recovery: the pipeline fell behind but the decoder is still healthy.
+    // Keep it configured (no close/reconfigure cost, no SPS re-init) and just
+    // drop incoming deltas until the next keyframe to shed accumulated latency.
+    // Frames already inside the decoder keep draining to the canvas meanwhile,
+    // so the stream stays smooth instead of freezing on a teardown.
+    const recoverToKeyframe = () => {
+      const now = performance.now();
+      if (now - lastDecoderRecoveryAt < DECODER_RECOVERY_COOLDOWN_MS && droppingUntilKeyframe) return;
+      lastDecoderRecoveryAt = now;
+      droppingUntilKeyframe = true;
+      requestKeyframe();
+    };
+
+    // Hard recovery: the decoder itself errored. Tear it down and rebuild from
+    // the next keyframe's SPS/PPS.
     const beginDecoderRecovery = () => {
       const now = performance.now();
       if (now - lastDecoderRecoveryAt < DECODER_RECOVERY_COOLDOWN_MS && droppingUntilKeyframe) return;
@@ -200,7 +219,7 @@ export function useStream(canvasRef: RefObject<HTMLCanvasElement>) {
         },
       });
       try {
-        dec.configure({ codec, optimizeForLatency: true });
+        dec.configure({ codec, optimizeForLatency: true, hardwareAcceleration: "prefer-hardware" });
         decoder = dec;
         console.log("VideoDecoder configured:", codec);
         return true;
@@ -240,7 +259,7 @@ export function useStream(canvasRef: RefObject<HTMLCanvasElement>) {
       }
 
       if (decoder.decodeQueueSize > SOFT_DECODE_QUEUE_SIZE) {
-        beginDecoderRecovery();
+        recoverToKeyframe();
         return;
       }
 
