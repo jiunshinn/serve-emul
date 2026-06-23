@@ -1,6 +1,6 @@
-# Contributing to serve-emu
+# Contributing to serve-emul
 
-Thanks for taking the time to improve `serve-emu`. This project sits between
+Thanks for taking the time to improve `serve-emul`. This project sits between
 Android devices, scrcpy, Bun, WebSockets, and a browser UI, so small protocol or
 latency changes can have large user-visible effects. Please keep changes focused
 and include enough verification detail for reviewers to reproduce your results.
@@ -24,13 +24,13 @@ bun install
 Fetch the vendored scrcpy server and build the browser UI:
 
 ```sh
-bun run --filter serve-emu setup
+bun run --filter serve-emul setup
 ```
 
 Run the local server:
 
 ```sh
-bun run packages/serve-emu/src/cli.ts
+bun run packages/serve-emul/src/cli.ts
 ```
 
 Then open `http://localhost:3300`.
@@ -39,19 +39,19 @@ Useful alternatives:
 
 ```sh
 bun run dev
-bun run --filter serve-emu dev:ui
-bun run --filter serve-emu start
+bun run --filter serve-emul dev:ui
+bun run --filter serve-emul start
 ```
 
 ## Project Layout
 
-- `packages/serve-emu/src/cli.ts` - CLI entry point
-- `packages/serve-emu/src/server.ts` - HTTP, WebSocket, and API server
-- `packages/serve-emu/src/scrcpy.ts` - scrcpy server lifecycle and video stream handling
-- `packages/serve-emu/src/input.ts` - scrcpy control socket message encoding
-- `packages/serve-emu/src/emulator.ts` - Android Emulator discovery and launch helpers
-- `packages/serve-emu/src/ui/` - React browser UI
-- `packages/serve-emu/scripts/fetch-scrcpy.ts` - pinned scrcpy server downloader
+- `packages/serve-emul/src/cli.ts` - CLI entry point
+- `packages/serve-emul/src/server.ts` - HTTP, WebSocket, and API server
+- `packages/serve-emul/src/scrcpy.ts` - scrcpy server lifecycle and video stream handling
+- `packages/serve-emul/src/input.ts` - scrcpy control socket message encoding
+- `packages/serve-emul/src/emulator.ts` - Android Emulator discovery and launch helpers
+- `packages/serve-emul/src/ui/` - React browser UI
+- `packages/serve-emul/scripts/fetch-scrcpy.ts` - pinned scrcpy server downloader
 
 Prefer kebab-case for TypeScript and JavaScript filenames.
 
@@ -60,16 +60,16 @@ Prefer kebab-case for TypeScript and JavaScript filenames.
 Before opening a pull request, run the checks that match your change:
 
 ```sh
-bun run --filter serve-emu typecheck
-bun run --filter serve-emu typecheck:ui
-bun run --filter serve-emu build
+bun run --filter serve-emul typecheck
+bun run --filter serve-emul typecheck:ui
+bun run --filter serve-emul build
 ```
 
 For runtime changes, also test against a real device or emulator:
 
 ```sh
 adb devices
-bun run packages/serve-emu/src/cli.ts
+bun run packages/serve-emul/src/cli.ts
 ```
 
 Verify the relevant user flow in the browser, such as:
@@ -86,10 +86,10 @@ you performed in the pull request.
 ## scrcpy and ADB Notes
 
 Streaming uses the vendored scrcpy server at `vendor/scrcpy-server-v<VERSION>`.
-The pinned version is controlled by `packages/serve-emu/scripts/fetch-scrcpy.ts`.
+The pinned version is controlled by `packages/serve-emul/scripts/fetch-scrcpy.ts`.
 
 The scrcpy wire protocol can drift between major versions. If you bump the
-scrcpy server version, re-validate `packages/serve-emu/src/scrcpy.ts` against the
+scrcpy server version, re-validate `packages/serve-emul/src/scrcpy.ts` against the
 new server and document what changed.
 
 Current protocol shape:
@@ -143,7 +143,7 @@ git commit -m "<scoped message>" -- path/to/file1 path/to/file2
 
 ## Release Guidelines
 
-`serve-emu` uses the package version in `packages/serve-emu/package.json` as the
+`serve-emul` uses the package version in `packages/serve-emul/package.json` as the
 source of truth. Release tags should be named `v<version>`, for example
 `v0.1.0`.
 
@@ -161,7 +161,7 @@ bun run release -- patch
 
 You can also pass `minor`, `major`, or an exact version such as `0.1.0`.
 
-Before publishing, review `packages/serve-emu/CHANGELOG.md`, then run:
+Before publishing, review `packages/serve-emul/CHANGELOG.md`, then run:
 
 ```sh
 bun run check
@@ -173,9 +173,9 @@ build.
 Commit only the version and changelog files, then tag and publish:
 
 ```sh
-git commit -m "Release v<version>" -- packages/serve-emu/package.json packages/serve-emu/CHANGELOG.md
+git commit -m "Release v<version>" -- packages/serve-emul/package.json packages/serve-emul/CHANGELOG.md
 git tag v<version>
-npm publish packages/serve-emu
+npm publish packages/serve-emul
 git push origin HEAD --tags
 ```
 
@@ -183,12 +183,12 @@ git push origin HEAD --tags
 
 When reporting a bug, include:
 
-- `serve-emu` version or commit SHA
+- `serve-emul` version or commit SHA
 - Bun and Node.js versions
 - host OS
 - device or emulator type and Android version
 - `adb devices` output with serials redacted if needed
-- exact command used to start `serve-emu`
+- exact command used to start `serve-emul`
 - browser and version
 - logs, screenshots, or a short recording if available
 

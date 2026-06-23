@@ -1,13 +1,13 @@
 {
-  "name": "serve-emu-monorepo",
+  "name": "serve-emul-monorepo",
   "private": true,
   "workspaces": ["packages/*"],
   "scripts": {
-    "dev": "bun run --filter serve-emu dev",
-    "build": "bun run --filter serve-emu build",
-    "test": "bun run --filter serve-emu test",
-    "check": "bun run --filter serve-emu check",
-    "release": "bun run --filter serve-emu release"
+    "dev": "bun run --filter serve-emul dev",
+    "build": "bun run --filter serve-emul build",
+    "test": "bun run --filter serve-emul test",
+    "check": "bun run --filter serve-emul check",
+    "release": "bun run --filter serve-emul release"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

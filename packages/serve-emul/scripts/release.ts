@@ -131,6 +131,6 @@ console.log(`- ${changelogPath}`);
 console.log("\nNext:");
 console.log("1. Review CHANGELOG.md and edit sections if needed.");
 console.log("2. Run: bun run check");
-console.log(`3. Commit: git commit -m "Release v${version}" -- packages/serve-emu/package.json packages/serve-emu/CHANGELOG.md`);
+console.log(`3. Commit: git commit -m "Release v${version}" -- packages/serve-emul/package.json packages/serve-emul/CHANGELOG.md`);
 console.log(`4. Tag: git tag v${version}`);
-console.log("5. Publish from a clean tree: npm publish packages/serve-emu");
+console.log("5. Publish from a clean tree: npm publish packages/serve-emul");

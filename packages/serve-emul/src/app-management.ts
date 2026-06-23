@@ -59,7 +59,7 @@ export function permissionName(value: unknown): string {
 
 export async function installApk(serial: string, file: File): Promise<AppActionResult> {
   if (!file.name.toLowerCase().endsWith(".apk")) throw new Error("APK file must end with .apk");
-  const dir = mkdtempSync(join(tmpdir(), "serve-emu-apk-"));
+  const dir = mkdtempSync(join(tmpdir(), "serve-emul-apk-"));
   const path = join(dir, "upload.apk");
   try {
     writeFileSync(path, new Uint8Array(await file.arrayBuffer()));
@@ -84,7 +84,7 @@ function mediaKind(file: File): FileImportResult["kind"] {
 }
 
 export async function importMediaFile(serial: string, file: File): Promise<FileImportResult> {
-  const dir = mkdtempSync(join(tmpdir(), "serve-emu-media-"));
+  const dir = mkdtempSync(join(tmpdir(), "serve-emul-media-"));
   const localPath = join(dir, safeFileName(file.name));
   const kind = mediaKind(file);
   const remoteDir =

@@ -36,24 +36,24 @@ function numberOption(name: string, fallback: number): number {
 }
 
 async function checkForUpdate() {
-  if (process.env.SERVE_EMU_UPDATE_CHECK === "0") return;
+  if (process.env.SERVE_EMUL_UPDATE_CHECK === "0") return;
 
   const notice = await getUpdateNotice({
     packageName: packageJson.name,
     currentVersion: packageJson.version,
-    cachePath: process.env.SERVE_EMU_UPDATE_CHECK_CACHE,
+    cachePath: process.env.SERVE_EMUL_UPDATE_CHECK_CACHE,
   });
   if (notice) console.error(notice);
 }
 
 if (values.help) {
-  console.log(`serve-emu — host an Android device over scrcpy + WebSocket
+  console.log(`serve-emul — host an Android device over scrcpy + WebSocket
 
 Usage:
-  serve-emu [-p <port>] [-s <serial>] [--max-fps N] [--bit-rate N] [--max-size N] [--key-frame-interval sec]
-  serve-emu --avd <name> [--restart-avd]
-  serve-emu --avd-list
-  serve-emu --running-avds
+  serve-emul [-p <port>] [-s <serial>] [--max-fps N] [--bit-rate N] [--max-size N] [--key-frame-interval sec]
+  serve-emul --avd <name> [--restart-avd]
+  serve-emul --avd-list
+  serve-emul --running-avds
 
 Options:
   -p, --port <port>      Port to listen on (default: 3300)
@@ -140,7 +140,7 @@ async function main() {
     process.exit(0);
   });
 
-  console.log(`serve-emu → http://localhost:${server.port}  (device: ${serial})`);
+  console.log(`serve-emul → http://localhost:${server.port}  (device: ${serial})`);
 }
 
 await main().catch((err) => {

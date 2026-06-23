@@ -12,7 +12,7 @@ export function StatusBar({ status, deviceSize, fps }: Props) {
     (deviceSize ? ` • ${deviceSize.width}×${deviceSize.height} • ${fps} fps` : "");
   return (
     <header>
-      <h1>serve-emu</h1>
+      <h1>serve-emul</h1>
       <div className="meta">{meta}</div>
     </header>
   );

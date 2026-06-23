@@ -5,5 +5,5 @@ dist
 .env*
 bun.lock
 *.bun-build
-packages/serve-emu/vendor/scrcpy-server-v*
+packages/serve-emul/vendor/scrcpy-server-v*
 package-lock.json

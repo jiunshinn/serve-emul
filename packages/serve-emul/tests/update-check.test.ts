@@ -15,7 +15,7 @@ describe("getUpdateNotice", () => {
     const writes: UpdateCache[] = [];
 
     const notice = await getUpdateNotice({
-      packageName: "serve-emu",
+      packageName: "serve-emul",
       currentVersion: "0.0.3",
       now: () => 1000,
       readCache: async () => null,
@@ -25,7 +25,7 @@ describe("getUpdateNotice", () => {
       fetchLatest: async () => "0.0.4",
     });
 
-    expect(notice).toBe("Update available: serve-emu 0.0.3 -> 0.0.4\nRun: bunx serve-emu@latest");
+    expect(notice).toBe("Update available: serve-emul 0.0.3 -> 0.0.4\nRun: bunx serve-emul@latest");
     expect(writes).toEqual([{ checkedAt: 1000, latestVersion: "0.0.4" }]);
   });
 
@@ -33,7 +33,7 @@ describe("getUpdateNotice", () => {
     let fetches = 0;
 
     const notice = await getUpdateNotice({
-      packageName: "serve-emu",
+      packageName: "serve-emul",
       currentVersion: "0.0.3",
       now: () => UPDATE_CHECK_INTERVAL_MS,
       readCache: async () => ({ checkedAt: 1, latestVersion: "0.0.4" }),
@@ -43,13 +43,13 @@ describe("getUpdateNotice", () => {
       },
     });
 
-    expect(notice).toBe("Update available: serve-emu 0.0.3 -> 0.0.4\nRun: bunx serve-emu@latest");
+    expect(notice).toBe("Update available: serve-emul 0.0.3 -> 0.0.4\nRun: bunx serve-emul@latest");
     expect(fetches).toBe(0);
   });
 
   test("does not return a notice when already current", async () => {
     const notice = await getUpdateNotice({
-      packageName: "serve-emu",
+      packageName: "serve-emul",
       currentVersion: "0.0.3",
       readCache: async () => null,
       writeCache: async () => {},

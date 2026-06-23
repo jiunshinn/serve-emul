@@ -1,22 +1,22 @@
-# serve-emu Agent Notes
+# serve-emul Agent Notes
 
-`serve-emu` is a Bun workspace package that streams an Android emulator or device through scrcpy, forwards H.264 over WebSockets, and decodes it in the browser with WebCodecs. Optimize changes for low latency, protocol correctness, and agent-friendly control APIs.
+`serve-emul` is a Bun workspace package that streams an Android emulator or device through scrcpy, forwards H.264 over WebSockets, and decodes it in the browser with WebCodecs. Optimize changes for low latency, protocol correctness, and agent-friendly control APIs.
 
 ## Project Layout
 
-- Root scripts delegate to the `serve-emu` workspace package.
-- Main package: `packages/serve-emu`.
-- CLI entry point: `packages/serve-emu/src/cli.ts`.
-- HTTP, WebSocket, health, and REST APIs: `packages/serve-emu/src/server.ts`.
-- scrcpy process, adb forward tunnel, socket setup, and frame parsing: `packages/serve-emu/src/scrcpy.ts`.
-- scrcpy control socket message encoding for taps, swipes, keys, text, and video reset: `packages/serve-emu/src/input.ts`.
-- Android emulator discovery and launch helpers: `packages/serve-emu/src/emulator.ts`.
-- ADB helpers: `packages/serve-emu/src/adb.ts`.
-- App install/launch/clear/grant/import helpers: `packages/serve-emu/src/app-management.ts`.
-- Location and route playback: `packages/serve-emu/src/location.ts` and `packages/serve-emu/src/route-playback.ts`.
-- Session recording/replay: `packages/serve-emu/src/session-recorder.ts`.
-- React UI: `packages/serve-emu/src/ui`.
-- Vendored scrcpy downloader and pinned version: `packages/serve-emu/scripts/fetch-scrcpy.ts`.
+- Root scripts delegate to the `serve-emul` workspace package.
+- Main package: `packages/serve-emul`.
+- CLI entry point: `packages/serve-emul/src/cli.ts`.
+- HTTP, WebSocket, health, and REST APIs: `packages/serve-emul/src/server.ts`.
+- scrcpy process, adb forward tunnel, socket setup, and frame parsing: `packages/serve-emul/src/scrcpy.ts`.
+- scrcpy control socket message encoding for taps, swipes, keys, text, and video reset: `packages/serve-emul/src/input.ts`.
+- Android emulator discovery and launch helpers: `packages/serve-emul/src/emulator.ts`.
+- ADB helpers: `packages/serve-emul/src/adb.ts`.
+- App install/launch/clear/grant/import helpers: `packages/serve-emul/src/app-management.ts`.
+- Location and route playback: `packages/serve-emul/src/location.ts` and `packages/serve-emul/src/route-playback.ts`.
+- Session recording/replay: `packages/serve-emul/src/session-recorder.ts`.
+- React UI: `packages/serve-emul/src/ui`.
+- Vendored scrcpy downloader and pinned version: `packages/serve-emul/scripts/fetch-scrcpy.ts`.
 
 Prefer kebab-case for TypeScript and JavaScript filenames.
 
@@ -24,13 +24,13 @@ Prefer kebab-case for TypeScript and JavaScript filenames.
 
 ```sh
 bun install
-bun run --filter serve-emu setup
-bun run packages/serve-emu/src/cli.ts
+bun run --filter serve-emul setup
+bun run packages/serve-emul/src/cli.ts
 bun run dev
-bun run --filter serve-emu dev:ui
-bun run --filter serve-emu typecheck
-bun run --filter serve-emu typecheck:ui
-bun run --filter serve-emu build
+bun run --filter serve-emul dev:ui
+bun run --filter serve-emul typecheck
+bun run --filter serve-emul typecheck:ui
+bun run --filter serve-emul build
 ```
 
 `setup` downloads the pinned scrcpy server into `vendor/` and builds the browser UI. The CLI also runs the scrcpy setup lazily on first start.
@@ -46,7 +46,7 @@ bun run --filter serve-emu build
 
 ## scrcpy Protocol Notes
 
-Streaming runs through the vendored scrcpy server (`vendor/scrcpy-server-v<VERSION>`). The version is pinned in `packages/serve-emu/scripts/fetch-scrcpy.ts`. The wire protocol drifts between scrcpy majors, so bumping the version requires re-validating `packages/serve-emu/src/scrcpy.ts` and `packages/serve-emu/src/input.ts`.
+Streaming runs through the vendored scrcpy server (`vendor/scrcpy-server-v<VERSION>`). The version is pinned in `packages/serve-emul/scripts/fetch-scrcpy.ts`. The wire protocol drifts between scrcpy majors, so bumping the version requires re-validating `packages/serve-emul/src/scrcpy.ts` and `packages/serve-emul/src/input.ts`.
 
 Current server protocol shape:
 
@@ -56,7 +56,7 @@ Current server protocol shape:
 - Frames are `[8B PTS BE, 4B size BE, N B Annex-B NALUs]`.
 - PTS high bits mark config and key frames. Keep `PACKET_FLAG_CONFIG` and `PACKET_FLAG_KEY_FRAME` handling in sync with scrcpy.
 - Cache SPS/PPS config packets and prepend them to keyframes so clients joining mid-stream can initialize their decoder.
-- Control socket packets are binary messages described in `packages/serve-emu/src/input.ts`.
+- Control socket packets are binary messages described in `packages/serve-emul/src/input.ts`.
 
 ## Server and API Guidance
 
@@ -69,7 +69,7 @@ Current server protocol shape:
 
 ## UI Guidance
 
-- The UI lives under `packages/serve-emu/src/ui` and is built by Vite.
+- The UI lives under `packages/serve-emul/src/ui` and is built by Vite.
 - Keep streaming decode logic in `src/ui/lib/use-stream.ts` and H.264 helpers in `src/ui/lib/h264.ts`.
 - Device controls should call the local REST/WebSocket APIs instead of duplicating server-side adb or scrcpy logic in the UI.
 - When changing the stream protocol, update both the server frame metadata writer and the UI reader together.
@@ -79,16 +79,16 @@ Current server protocol shape:
 Run the checks that match the touched area:
 
 ```sh
-bun run --filter serve-emu typecheck
-bun run --filter serve-emu typecheck:ui
-bun run --filter serve-emu build
+bun run --filter serve-emul typecheck
+bun run --filter serve-emul typecheck:ui
+bun run --filter serve-emul build
 ```
 
 For runtime or protocol changes, also test manually with a booted emulator or device:
 
 ```sh
 adb devices
-bun run packages/serve-emu/src/cli.ts
+bun run packages/serve-emul/src/cli.ts
 ```
 
 Verify relevant flows: first video frame, browser refresh recovery, multiple tabs, tap/swipe/text/key input, `/api/screenshot`, changed REST APIs, logcat SSE, app management, location, route playback, and session replay when touched.

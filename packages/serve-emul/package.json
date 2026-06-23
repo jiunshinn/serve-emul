@@ -1,18 +1,18 @@
 {
-  "name": "serve-emu",
+  "name": "serve-emul",
   "version": "0.0.4",
   "description": "The `npx serve` of Android devices — stream a booted emulator or attached device over a WebSocket H.264 feed decoded in the browser with WebCodecs.",
   "license": "Apache-2.0",
   "type": "module",
   "author": "jiunshinn",
-  "homepage": "https://github.com/jiunshinn/serve-emu",
+  "homepage": "https://github.com/jiunshinn/serve-emul",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jiunshinn/serve-emu.git",
-    "directory": "packages/serve-emu"
+    "url": "git+https://github.com/jiunshinn/serve-emul.git",
+    "directory": "packages/serve-emul"
   },
   "bugs": {
-    "url": "https://github.com/jiunshinn/serve-emu/issues"
+    "url": "https://github.com/jiunshinn/serve-emul/issues"
   },
   "keywords": [
     "android",
@@ -29,7 +29,7 @@
     "bun": ">=1.1.0"
   },
   "bin": {
-    "serve-emu": "./src/cli.ts"
+    "serve-emul": "./src/cli.ts"
   },
   "scripts": {
     "setup": "bun run scripts/fetch-scrcpy.ts && bun run build:ui",
