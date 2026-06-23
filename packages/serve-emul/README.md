@@ -1,18 +1,27 @@
-# serve-emu
+# serve-emul
 
 The `npx serve` of Android devices.
 
 Host your Android emulator (or real device) for use with agent tools like Codex, Cursor, or Claude Desktop — locally, over your LAN, or tunnel anywhere.
 
 ```sh
-bunx serve-emu@latest
-# or: npx serve-emu@latest
+bunx serve-emul@latest
+# or: npx serve-emul@latest
 # → Preview at http://localhost:3300
 ```
 
 Use `@latest` for one-off runs so Bun/npm fetches the newest published version instead of reusing a cached or locally installed copy.
 
-`serve-emu` spawns the scrcpy server on the device, opens an adb forward tunnel, pipes H.264 frames over a WebSocket, and decodes them in the browser with WebCodecs. Input events flow back over the same socket to scrcpy's control channel.
+`serve-emul` spawns the scrcpy server on the device, opens an adb forward tunnel, pipes H.264 frames over a WebSocket, and decodes them in the browser with WebCodecs. Input events flow back over the same socket to scrcpy's control channel.
+
+## Package Rename
+
+The npm package name is `serve-emul`. npm package names cannot be renamed in place, so releases under this name should be published as a new package:
+
+```sh
+npm publish --workspace packages/serve-emul
+npm deprecate serve-emu "Package renamed to serve-emul. Use: npm install serve-emul"
+```
 
 ## Status
 
@@ -35,7 +44,7 @@ Working:
 Planned:
 
 - Multi-device routing
-- Embeddable Connect-style middleware (`serve-emu/middleware`)
+- Embeddable Connect-style middleware (`serve-emul/middleware`)
 - Compiled single binary
 
 ## Requirements
@@ -49,8 +58,8 @@ Planned:
 
 ```sh
 bun install
-bun run --filter serve-emu setup    # downloads scrcpy-server-v4.0 into vendor/
-bun run packages/serve-emu/src/cli.ts
+bun run --filter serve-emul setup    # downloads scrcpy-server-v4.0 into vendor/
+bun run packages/serve-emul/src/cli.ts
 # → http://localhost:3300
 ```
 
@@ -59,10 +68,10 @@ The `setup` step is also run lazily on first start, so you can skip it.
 ## CLI
 
 ```
-serve-emu [-p <port>] [-s <serial>] [--max-fps N] [--bit-rate N] [--max-size N] [--key-frame-interval sec]
-serve-emu --avd <name> [--restart-avd]
-serve-emu --avd-list
-serve-emu --running-avds
+serve-emul [-p <port>] [-s <serial>] [--max-fps N] [--bit-rate N] [--max-size N] [--key-frame-interval sec]
+serve-emul --avd <name> [--restart-avd]
+serve-emul --avd-list
+serve-emul --running-avds
 ```
 
 | flag | default | meaning |
@@ -169,7 +178,7 @@ curl -X POST http://localhost:3300/api/apps/grant \
 
 ```
 ┌──────────────────┐ adb forward  ┌─────────────┐  H264 / WS    ┌─────────┐
-│ scrcpy-server.jar│ ◄──────────► │  serve-emu  │ ────────────► │ Browser │
+│ scrcpy-server.jar│ ◄──────────► │  serve-emul  │ ────────────► │ Browser │
 │ on device        │  TCP tunnel  │   (Bun)     │   WebCodecs   │ <canvas>│
 │  • video socket  │              │             │ ◄──────────── │         │
 │  • control socket│              │             │  input JSON   │         │

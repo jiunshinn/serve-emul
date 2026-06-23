@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 export const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
-export const UPDATE_CHECK_CACHE = join(homedir(), ".cache", "serve-emu", "update-check.json");
+export const UPDATE_CHECK_CACHE = join(homedir(), ".cache", "serve-emul", "update-check.json");
 
 export type UpdateCache = {
   checkedAt?: number;
