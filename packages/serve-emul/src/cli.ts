@@ -22,6 +22,7 @@ const { values } = parseArgs({
     "restart-avd": { type: "boolean" },
     emulator: { type: "string" },
     "emulator-port": { type: "string" },
+    gpu: { type: "string", default: "host" },
     help: { type: "boolean", short: "h" },
   },
   allowPositionals: true,
@@ -67,6 +68,10 @@ Options:
                          Ask the encoder for regular keyframes; 0 disables this
                          codec option (default: 1)
       --avd <name>       Launch this Android Virtual Device before streaming
+      --gpu <mode>       Emulator GPU mode for --avd launches (default: host).
+                         host uses the real GPU for smooth ~60fps; the AVD's
+                         own auto often falls back to a software compositor that
+                         stutters. Use swiftshader_indirect on headless hosts.
       --restart-avd      Stop a running matching AVD before launching it
       --avd-list         Print available Android Virtual Device names
       --running-avds     Print currently running emulator AVDs
@@ -82,12 +87,12 @@ async function main() {
   await checkForUpdate().catch(() => {});
 
   if (values["avd-list"]) {
-    console.log(listAvds(values.emulator).join("\n"));
+    console.log((await listAvds(values.emulator)).join("\n"));
     return;
   }
 
   if (values["running-avds"]) {
-    const running = listRunningAvds();
+    const running = await listRunningAvds();
     console.log(running.length ? running.map((avd) => `${avd.serial}\t${avd.avd}\t${avd.state}`).join("\n") : "");
     return;
   }
@@ -107,8 +112,9 @@ async function main() {
         emulatorPath: values.emulator,
         port: values["emulator-port"] ? Number(values["emulator-port"]) : undefined,
         restartAvd: values["restart-avd"],
+        gpu: values.gpu,
       })).serial
-    : pickDevice(values.serial);
+    : await pickDevice(values.serial);
   const port = Number(values.port);
   const maxFps = numberOption("max-fps", 60);
   const bitRate = numberOption("bit-rate", 8_000_000);

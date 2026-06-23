@@ -1,7 +1,7 @@
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execText } from "./exec.ts";
 
 export type AppActionResult = {
   ok: true;
@@ -21,12 +21,8 @@ function output(stdout: string, stderr: string): string {
   return `${stdout}${stderr}`.trim();
 }
 
-function adb(serial: string, args: string[], timeout = 30_000): AppActionResult {
-  const result = spawnSync("adb", ["-s", serial, ...args], {
-    encoding: "utf8",
-    maxBuffer: 8 * 1024 * 1024,
-    timeout,
-  });
+async function adb(serial: string, args: string[], timeout = 30_000): Promise<AppActionResult> {
+  const result = await execText("adb", ["-s", serial, ...args], { timeout });
   const text = output(result.stdout, result.stderr);
   if (result.status !== 0) {
     throw new Error(text || `adb ${args.join(" ")} failed`);
@@ -34,7 +30,7 @@ function adb(serial: string, args: string[], timeout = 30_000): AppActionResult 
   return { ok: true, output: text };
 }
 
-function adbHost(serial: string, args: string[], timeout = 30_000): AppActionResult {
+function adbHost(serial: string, args: string[], timeout = 30_000): Promise<AppActionResult> {
   return adb(serial, args, timeout);
 }
 
@@ -63,7 +59,7 @@ export async function installApk(serial: string, file: File): Promise<AppActionR
   const path = join(dir, "upload.apk");
   try {
     writeFileSync(path, new Uint8Array(await file.arrayBuffer()));
-    return adb(serial, ["install", "-r", path], 120_000);
+    return await adb(serial, ["install", "-r", path], 120_000);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -92,9 +88,9 @@ export async function importMediaFile(serial: string, file: File): Promise<FileI
   const remotePath = `${remoteDir}/${safeFileName(file.name)}`;
   try {
     writeFileSync(localPath, new Uint8Array(await file.arrayBuffer()));
-    adb(serial, ["shell", "mkdir", "-p", remoteDir]);
-    adbHost(serial, ["push", localPath, remotePath], 120_000);
-    adb(serial, [
+    await adb(serial, ["shell", "mkdir", "-p", remoteDir]);
+    await adbHost(serial, ["push", localPath, remotePath], 120_000);
+    await adb(serial, [
       "shell",
       "am",
       "broadcast",
@@ -109,7 +105,7 @@ export async function importMediaFile(serial: string, file: File): Promise<FileI
   }
 }
 
-export function launchApp(serial: string, packageNameValue: string, activity?: string): AppActionResult {
+export function launchApp(serial: string, packageNameValue: string, activity?: string): Promise<AppActionResult> {
   const pkg = packageName(packageNameValue);
   if (activity) {
     const act = activityName(activity);
@@ -127,11 +123,11 @@ export function launchApp(serial: string, packageNameValue: string, activity?: s
   ]);
 }
 
-export function clearAppData(serial: string, packageNameValue: string): AppActionResult {
+export function clearAppData(serial: string, packageNameValue: string): Promise<AppActionResult> {
   return adb(serial, ["shell", "pm", "clear", packageName(packageNameValue)]);
 }
 
-export function forceStopApp(serial: string, packageNameValue: string): AppActionResult {
+export function forceStopApp(serial: string, packageNameValue: string): Promise<AppActionResult> {
   return adb(serial, ["shell", "am", "force-stop", packageName(packageNameValue)]);
 }
 
@@ -139,7 +135,7 @@ export function grantPermission(
   serial: string,
   packageNameValue: string,
   permissionValue: string,
-): AppActionResult {
+): Promise<AppActionResult> {
   return adb(serial, [
     "shell",
     "pm",
