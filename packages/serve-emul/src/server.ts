@@ -17,7 +17,12 @@ import {
   type NightMode,
   type OrientationMode,
 } from "./adb.ts";
-import { getAccessibilitySnapshot } from "./accessibility.ts";
+import {
+  findAccessibilityNode,
+  getAccessibilitySnapshot,
+  parseAccessibilitySelector,
+  type AccessibilitySnapshot,
+} from "./accessibility.ts";
 import {
   clearAppData,
   forceStopApp,
@@ -140,6 +145,8 @@ export async function startServer(opts: ServerOpts) {
   let sessionRecorder = new SessionRecorder();
   let routePlayback = createRoutePlayback();
   let sessionGeneration = 0;
+  let accessibilitySnapshotCache: { snapshot: AccessibilitySnapshot; expiresMs: number } | null = null;
+  let accessibilitySnapshotInFlight: Promise<AccessibilitySnapshot> | null = null;
 
   const health = () => ({
     ok: status === "streaming",
@@ -300,6 +307,23 @@ export async function startServer(opts: ServerOpts) {
     Array.isArray(value) ||
     (value as Record<string, unknown>).record !== false;
 
+  const readAccessibilitySnapshot = async (cacheMs = 2_500) => {
+    const now = Date.now();
+    if (accessibilitySnapshotCache && accessibilitySnapshotCache.expiresMs > now) {
+      return accessibilitySnapshotCache.snapshot;
+    }
+    if (accessibilitySnapshotInFlight) return accessibilitySnapshotInFlight;
+    accessibilitySnapshotInFlight = getAccessibilitySnapshot(currentSerial)
+      .then((snapshot) => {
+        accessibilitySnapshotCache = { snapshot, expiresMs: Date.now() + cacheMs };
+        return snapshot;
+      })
+      .finally(() => {
+        accessibilitySnapshotInFlight = null;
+      });
+    return accessibilitySnapshotInFlight;
+  };
+
   const dispatchGesture = async (gesture: Gesture, source: string, record = true) => {
     if (status !== "streaming") throw new Error(`session is ${status}`);
     await dispatch(session.controlSocket, gesture, screen);
@@ -441,6 +465,43 @@ export async function startServer(opts: ServerOpts) {
           : parseGesture({ ...payload, type: "key" });
       await dispatchGesture(gesture, "rest:key", shouldRecord(payload));
       return Response.json({ ok: true });
+    } catch (err) {
+      return Response.json(
+        { ok: false, error: err instanceof Error ? err.message : String(err) },
+        { status: 400 },
+      );
+    }
+  };
+
+  const accessibilityTapEndpoint = async (req: Request) => {
+    try {
+      const payload = await readJsonBody(req);
+      if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+        throw new Error("accessibility tap payload must be an object");
+      }
+      const body = payload as Record<string, unknown>;
+      const selector = parseAccessibilitySelector(body.selector ?? body);
+      const snapshot = await readAccessibilitySnapshot(1_000);
+      const node = findAccessibilityNode(snapshot.nodes, selector);
+      const centerX = (node.bounds.left + node.bounds.right) / 2;
+      const centerY = (node.bounds.top + node.bounds.bottom) / 2;
+      const accessibilityWidth = Math.max(...snapshot.nodes.map((n) => n.bounds.right), screen.width);
+      const accessibilityHeight = Math.max(...snapshot.nodes.map((n) => n.bounds.bottom), screen.height);
+      const x = centerX / accessibilityWidth;
+      const y = centerY / accessibilityHeight;
+      if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 1 || y < 0 || y > 1) {
+        throw new Error("matched accessibility node is outside the current stream bounds");
+      }
+      await dispatchGesture(
+        {
+          type: "tap",
+          x,
+          y,
+        },
+        "accessibility:tap",
+        shouldRecord(payload),
+      );
+      return Response.json({ ok: true, node, capturedAt: snapshot.capturedAt });
     } catch (err) {
       return Response.json(
         { ok: false, error: err instanceof Error ? err.message : String(err) },
@@ -647,6 +708,8 @@ export async function startServer(opts: ServerOpts) {
     sessionRecorder = new SessionRecorder();
     routePlayback.close();
     routePlayback = createRoutePlayback();
+    accessibilitySnapshotCache = null;
+    accessibilitySnapshotInFlight = null;
   };
 
   const switchSession = async (serial: string) => {
@@ -1011,13 +1074,18 @@ export async function startServer(opts: ServerOpts) {
       if (url.pathname === "/api/accessibility") {
         if (req.method !== "GET") return new Response("method not allowed", { status: 405 });
         try {
-          return Response.json(await getAccessibilitySnapshot(currentSerial));
+          return Response.json(await readAccessibilitySnapshot());
         } catch (err) {
           return Response.json(
             { ok: false, error: err instanceof Error ? err.message : String(err) },
             { status: 400 },
           );
         }
+      }
+
+      if (url.pathname === "/api/accessibility/tap") {
+        if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+        return accessibilityTapEndpoint(req);
       }
 
       if (url.pathname === "/api/tap") {
