@@ -85,6 +85,7 @@ export function useStream(canvasRef: RefObject<HTMLCanvasElement>) {
     let renderRaf = 0;
     let lastDecoderRecoveryAt = 0;
     let lastKeyframeRequestAt = 0;
+    let lastRenderedAt = 0;
     let droppingUntilKeyframe = false;
     let healthTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -149,6 +150,7 @@ export function useStream(canvasRef: RefObject<HTMLCanvasElement>) {
       }
       ctx.drawImage(frame, 0, 0);
       frame.close();
+      lastRenderedAt = performance.now();
 
       fpsCount++;
       const now = performance.now();
@@ -318,14 +320,17 @@ export function useStream(canvasRef: RefObject<HTMLCanvasElement>) {
 
     const applyServerStatus = (d: ApiInfo) => {
       const lastFrameAgeMs = d.lastFrameAt ? Date.now() - Date.parse(d.lastFrameAt) : Infinity;
+      const hasRenderedFrame = lastRenderedAt > 0;
       setState((s) => ({
         ...s,
         deviceSize: d.size,
         status:
           d.status && d.status !== "streaming"
             ? d.lastError || d.status
-            : lastFrameAgeMs > 3000
-              ? "stream stalled"
+            : !hasRenderedFrame && lastFrameAgeMs > 5000
+              ? "waiting for video"
+              : s.status === "stream stalled" || s.status === "metadata unavailable"
+                ? "streaming"
               : s.status,
       }));
     };

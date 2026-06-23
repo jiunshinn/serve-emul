@@ -7,9 +7,10 @@ type Props = {
 };
 
 export function StatusBar({ status, deviceSize, fps }: Props) {
+  const frameRate = status === "streaming" && fps === 0 ? "idle" : `${fps} fps`;
   const meta =
     status +
-    (deviceSize ? ` • ${deviceSize.width}×${deviceSize.height} • ${fps} fps` : "");
+    (deviceSize ? ` • ${deviceSize.width}×${deviceSize.height} • ${frameRate}` : "");
   return (
     <header>
       <h1>serve-emul</h1>

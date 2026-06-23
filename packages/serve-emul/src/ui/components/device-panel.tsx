@@ -133,10 +133,6 @@ export function DevicePanel() {
 
   useEffect(() => {
     void refresh();
-    const timer = setInterval(() => {
-      void refresh();
-    }, 3000);
-    return () => clearInterval(timer);
   }, [refresh]);
 
   return (
@@ -223,8 +219,6 @@ export function OrientationPanel() {
 
   useEffect(() => {
     void refreshOrientation();
-    const timer = setInterval(() => void refreshOrientation(), 3000);
-    return () => clearInterval(timer);
   }, [refreshOrientation]);
 
   return (
@@ -302,8 +296,6 @@ export function NightModePanel() {
 
   useEffect(() => {
     void refreshNightMode();
-    const timer = setInterval(() => void refreshNightMode(), 3000);
-    return () => clearInterval(timer);
   }, [refreshNightMode]);
 
   return (
@@ -379,8 +371,6 @@ export function FontScalePanel() {
 
   useEffect(() => {
     void refreshFontScale();
-    const timer = setInterval(() => void refreshFontScale(), 3000);
-    return () => clearInterval(timer);
   }, [refreshFontScale]);
 
   return (
@@ -455,8 +445,6 @@ export function NetworkPanel() {
 
   useEffect(() => {
     void refreshNetwork();
-    const timer = setInterval(() => void refreshNetwork(), 5000);
-    return () => clearInterval(timer);
   }, [refreshNetwork]);
 
   return (

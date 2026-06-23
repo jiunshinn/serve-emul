@@ -67,10 +67,8 @@ export function AppManagementPanel() {
       }
     };
     void refresh();
-    const timer = setInterval(refresh, 2500);
     return () => {
       cancelled = true;
-      clearInterval(timer);
     };
   }, []);
 

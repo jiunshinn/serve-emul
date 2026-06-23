@@ -88,7 +88,8 @@ const FRAME_META_VERSION = 1;
 const FRAME_META_HEADER_BYTES = 16;
 const FRAME_FLAG_KEY = 1 << 0;
 const VIDEO_RESET_COOLDOWN_MS = 1500;
-const STALE_VIDEO_RESET_MS = 2500;
+const FIRST_FRAME_RESET_MS = 5000;
+const AWAITING_KEYFRAME_RESET_MS = 2500;
 const MAX_JSON_BODY_BYTES = 8 * 1024;
 const MAX_ROUTE_BODY_BYTES = 2 * 1024 * 1024;
 const MAX_LOGCAT_QUERY_BYTES = 200;
@@ -684,9 +685,16 @@ export async function startServer(opts: ServerOpts) {
     sourceFps = frameCount - lastFpsFrameCount;
     lastFpsFrameCount = frameCount;
     if (status !== "streaming" || clients.size === 0) return;
-    const lastFrameSeenMs = lastFrameMs || startedMs;
-    if (Date.now() - lastFrameSeenMs > STALE_VIDEO_RESET_MS) {
-      requestVideoReset("source stream stalled");
+    const now = Date.now();
+    if (frameCount === 0 && now - startedMs > FIRST_FRAME_RESET_MS) {
+      requestVideoReset("first video frame not received");
+      return;
+    }
+    if (
+      Array.from(clients).some((client) => client.awaitingKeyFrame) &&
+      now - (lastFrameMs || startedMs) > AWAITING_KEYFRAME_RESET_MS
+    ) {
+      requestVideoReset("client awaiting keyframe");
     }
   }, 1000);
 
