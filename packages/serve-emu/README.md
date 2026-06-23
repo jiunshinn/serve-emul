@@ -26,6 +26,7 @@ v1. Working:
 - Emulator GPS location control from the browser UI and `POST /api/location`
 - Route playback from GPX, GeoJSON, KML, or waypoint JSON
 - Logcat forwarding over SSE with browser-side filter, pause, and copy controls
+- Network on/off control from the browser UI and `POST /api/network`
 - Agent-friendly REST input APIs plus session event replay
 - App management controls for APK install, launch, clear data, force stop, and permission grants
 
@@ -123,6 +124,16 @@ Stream logcat over SSE:
 
 ```sh
 curl -N 'http://localhost:3300/api/logcat?package=com.example.app&search=error'
+```
+
+Toggle device network:
+
+```sh
+curl http://localhost:3300/api/network
+
+curl -X POST http://localhost:3300/api/network \
+  -H 'Content-Type: application/json' \
+  -d '{"enabled":false}'
 ```
 
 Replay recorded input and location events:
