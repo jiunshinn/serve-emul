@@ -188,6 +188,12 @@ curl "$BASE/api/screenshot" --output screen.png
 curl "$BASE/api/screenshot?format=base64"
 curl "$BASE/api/foreground"
 curl "$BASE/api/accessibility"
+curl -X POST "$BASE/api/accessibility/tap" \
+  -H 'Content-Type: application/json' \
+  -d '{"selector":{"resourceId":"com.example:id/login"}}'
+curl -X POST "$BASE/api/accessibility/tap" \
+  -H 'Content-Type: application/json' \
+  -d '{"selector":{"textContains":"Continue","clickable":true}}'
 curl -N "$BASE/api/logcat?package=com.example.app&search=error"
 ```
 

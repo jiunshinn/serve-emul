@@ -9,6 +9,7 @@ type Props = {
   accessibilityNodes?: AccessibilityNode[];
   accessibilityEnabled?: boolean;
   highlightedAccessibilityId?: string | null;
+  onAccessibilityHover?: (id: string | null) => void;
   deviceSize?: { width: number; height: number } | null;
 };
 
@@ -22,11 +23,24 @@ export function DeviceStream({
   accessibilityNodes = [],
   accessibilityEnabled = false,
   highlightedAccessibilityId = null,
+  onAccessibilityHover,
   deviceSize = null,
 }: Props) {
   const activeRef = useRef<{ id: number; x: number; y: number } | null>(null);
   const pendingMoveRef = useRef<Point | null>(null);
   const moveRafRef = useRef(0);
+  const accessibilitySize = accessibilityNodes.length
+    ? accessibilityNodes.reduce(
+        (size, node) => ({
+          width: Math.max(size.width, node.bounds.right),
+          height: Math.max(size.height, node.bounds.bottom),
+        }),
+        {
+          width: deviceSize?.width ?? 1,
+          height: deviceSize?.height ?? 1,
+        },
+      )
+    : deviceSize;
 
   const pointFromClient = (clientX: number, clientY: number): Point | null => {
     const canvas = canvasRef.current;
@@ -40,6 +54,31 @@ export function DeviceStream({
 
   const norm = (e: PointerEvent<HTMLCanvasElement>): Point | null =>
     pointFromClient(e.clientX, e.clientY);
+
+  const accessibilityNodeAt = (p: Point): AccessibilityNode | null => {
+    if (!accessibilityEnabled || !accessibilitySize) return null;
+    const x = p.x * accessibilitySize.width;
+    const y = p.y * accessibilitySize.height;
+    const matches = accessibilityNodes
+      .filter(
+        (node) =>
+          x >= node.bounds.left &&
+          x <= node.bounds.right &&
+          y >= node.bounds.top &&
+          y <= node.bounds.bottom,
+      )
+      .sort((a, b) => {
+        const areaA = (a.bounds.right - a.bounds.left) * (a.bounds.bottom - a.bounds.top);
+        const areaB = (b.bounds.right - b.bounds.left) * (b.bounds.bottom - b.bounds.top);
+        return areaA - areaB;
+      });
+    return matches[0] ?? null;
+  };
+
+  const updateAccessibilityHover = (p: Point | null) => {
+    if (!onAccessibilityHover) return;
+    onAccessibilityHover(p ? accessibilityNodeAt(p)?.id ?? null : null);
+  };
 
   const sendTouch = (action: "down" | "move" | "up", p: Point, pointerId: number) => {
     send({ type: "touch", action, x: p.x, y: p.y, pointerId }, false);
@@ -67,6 +106,7 @@ export function DeviceStream({
     if (e.pointerType === "mouse" && e.button !== 0) return;
     if (activeRef.current) return;
     e.preventDefault();
+    updateAccessibilityHover(null);
     canvasRef.current?.setPointerCapture(e.pointerId);
     const p = norm(e);
     if (!p) return;
@@ -77,11 +117,15 @@ export function DeviceStream({
 
   const onPointerMove = (e: PointerEvent<HTMLCanvasElement>) => {
     const active = activeRef.current;
-    if (!active || e.pointerId !== active.id) return;
-    e.preventDefault();
     const native = e.nativeEvent;
     const coalesced =
       typeof native.getCoalescedEvents === "function" ? native.getCoalescedEvents() : null;
+    if (!active || e.pointerId !== active.id) {
+      const hoverEvent = coalesced && coalesced.length > 0 ? coalesced[coalesced.length - 1] : e;
+      updateAccessibilityHover(pointFromClient(hoverEvent.clientX, hoverEvent.clientY));
+      return;
+    }
+    e.preventDefault();
     if (coalesced && coalesced.length > 0) {
       const last = coalesced[coalesced.length - 1];
       const p = pointFromClient(last.clientX, last.clientY);
@@ -115,17 +159,18 @@ export function DeviceStream({
         ref={canvasRef}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
+        onPointerLeave={() => updateAccessibilityHover(null)}
         onPointerUp={stopPointer}
         onPointerCancel={stopPointer}
         onContextMenu={(e) => e.preventDefault()}
       />
-      {accessibilityEnabled && deviceSize && (
+      {accessibilityEnabled && accessibilitySize && (
         <div className="ax-overlay" aria-hidden="true">
           {accessibilityNodes.map((node) => {
-            const left = (node.bounds.left / deviceSize.width) * 100;
-            const top = (node.bounds.top / deviceSize.height) * 100;
-            const width = ((node.bounds.right - node.bounds.left) / deviceSize.width) * 100;
-            const height = ((node.bounds.bottom - node.bounds.top) / deviceSize.height) * 100;
+            const left = (node.bounds.left / accessibilitySize.width) * 100;
+            const top = (node.bounds.top / accessibilitySize.height) * 100;
+            const width = ((node.bounds.right - node.bounds.left) / accessibilitySize.width) * 100;
+            const height = ((node.bounds.bottom - node.bounds.top) / accessibilitySize.height) * 100;
             const active = node.id === highlightedAccessibilityId;
             return (
               <div

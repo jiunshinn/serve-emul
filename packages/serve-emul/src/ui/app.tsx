@@ -68,6 +68,7 @@ export function App() {
             accessibilityEnabled={accessibilityEnabled}
             accessibilityNodes={accessibilityNodes}
             highlightedAccessibilityId={highlightedAccessibilityId}
+            onAccessibilityHover={setHighlightedAccessibilityId}
             deviceSize={state.deviceSize}
           />
         </div>
