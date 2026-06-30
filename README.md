@@ -2,7 +2,11 @@
 
 Host your Android emulator or attached Android device for agent workflows like Codex, Cursor, Claude Desktop, and browser-based QA. `serve-emul` streams the screen locally, over your LAN, or through your tunnel of choice, then accepts low-latency input and device-control commands over HTTP and WebSocket.
 
-https://github.com/user-attachments/assets/7dd6d57c-4270-4b13-a733-992b7085d944
+
+
+https://github.com/user-attachments/assets/5646d44c-7fd1-4e97-8705-b44b47c7fdc6
+
+
 
 ```sh
 bunx serve-emul@latest
