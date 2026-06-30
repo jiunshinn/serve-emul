@@ -158,10 +158,23 @@ export function useStream(canvasRef: RefObject<HTMLCanvasElement>) {
       renderRaf = 0;
       if (frameQueueCount === 0) return;
 
+      // Latency-first policy: each vsync, present the NEWEST decoded frame and
+      // discard the staler ones still queued. They were superseded before they
+      // could be shown, so drawing them would only add display lag. Showing the
+      // freshest frame keeps glass-to-glass latency near one vsync interval
+      // instead of growing with queue depth (the old FIFO "render oldest"
+      // approach added ~15ms here). The queue stays as a small burst absorber.
       const tail = (frameQueueHead - frameQueueCount + FRAME_QUEUE_SIZE) % FRAME_QUEUE_SIZE;
-      const frame = frameQueue[tail]!;
-      frameQueue[tail] = null;
-      frameQueueCount--;
+      for (let k = 0; k < frameQueueCount - 1; k++) {
+        const idx = (tail + k) % FRAME_QUEUE_SIZE;
+        frameQueue[idx]?.close();
+        frameQueue[idx] = null;
+      }
+      const newest = (frameQueueHead - 1 + FRAME_QUEUE_SIZE) % FRAME_QUEUE_SIZE;
+      const frame = frameQueue[newest]!;
+      frameQueue[newest] = null;
+      frameQueueHead = 0;
+      frameQueueCount = 0;
 
       if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
         canvas.width = frame.displayWidth;
@@ -178,10 +191,6 @@ export function useStream(canvasRef: RefObject<HTMLCanvasElement>) {
         fpsCount = 0;
         fpsTimer = now;
         setState((s) => (s.fps === fps ? s : { ...s, fps }));
-      }
-
-      if (frameQueueCount > 0) {
-        renderRaf = requestAnimationFrame(() => renderFromQueue(canvas, ctx));
       }
     };
 
