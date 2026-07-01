@@ -24,6 +24,7 @@ Working:
 
 - Live H.264 video stream from device to WebCodecs canvas
 - Tap, swipe, text, keyevent, Back, Home, Recents, and Power input
+- Keyboard passthrough in the browser UI: editing/navigation keys, Ctrl/Cmd shortcuts (select all, copy, paste, cut, undo, redo), and IME composition for CJK text
 - Multi-client streaming, so multiple browser tabs can share one device
 - SPS/PPS replay and metadata headers for clients joining mid-stream
 - Device discovery, current-device switching, and AVD start/stop controls
@@ -122,7 +123,7 @@ You can confirm the mode in the emulator log (`vulkan_mode_selected:host` = good
 
 Open `http://localhost:3300` after starting the CLI. The UI streams the device into a canvas and exposes controls for:
 
-- Pointer input, text entry, hardware buttons, and screenshots
+- Pointer input, keyboard passthrough (typing, navigation keys, shortcuts, IME composition), hardware buttons, and screenshots
 - Device selection plus AVD start/stop
 - Orientation, night mode, font scale, network, GPS location, and route playback
 - Logcat filtering, pause/copy controls, app management, file import, and session replay
@@ -179,6 +180,19 @@ curl -X POST "$BASE/api/text" \
 curl -X POST "$BASE/api/key" \
   -H 'Content-Type: application/json' \
   -d '{"key":"back"}'
+```
+
+Arbitrary keycodes accept an optional `action` (`"down"` or `"up"`; omit for an immediate press) and an optional `metaState` bitmask using Android's `AMETA_*` values (`0x1` shift, `0x2` alt, `0x1000` ctrl):
+
+```sh
+# Ctrl+A (select all)
+curl -X POST "$BASE/api/key" \
+  -H 'Content-Type: application/json' \
+  -d '{"keycode":29,"metaState":4096}'
+
+# Hold DPAD_DOWN down, then release it later
+curl -X POST "$BASE/api/key" -H 'Content-Type: application/json' -d '{"keycode":20,"action":"down"}'
+curl -X POST "$BASE/api/key" -H 'Content-Type: application/json' -d '{"keycode":20,"action":"up"}'
 ```
 
 ### Inspection
@@ -298,6 +312,8 @@ Connect to `/ws` for the raw Annex-B H.264 stream. Send JSON control messages ov
 {"type":"swipe","x1":0.5,"y1":0.8,"x2":0.5,"y2":0.2,"durationMs":350}
 {"type":"text","text":"hello"}
 {"type":"key","keycode":66}
+{"type":"key","keycode":29,"metaState":4096}
+{"type":"key","keycode":20,"action":"down"}
 {"type":"back"}
 {"type":"reset-video"}
 ```
