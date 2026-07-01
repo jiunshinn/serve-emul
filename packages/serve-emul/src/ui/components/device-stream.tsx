@@ -11,6 +11,8 @@ type Props = {
   highlightedAccessibilityId?: string | null;
   onAccessibilityHover?: (id: string | null) => void;
   deviceSize?: { width: number; height: number } | null;
+  keyboardProxyRef?: RefObject<HTMLInputElement>;
+  keyboardActive?: boolean;
 };
 
 type Point = { x: number; y: number };
@@ -25,6 +27,8 @@ export function DeviceStream({
   highlightedAccessibilityId = null,
   onAccessibilityHover,
   deviceSize = null,
+  keyboardProxyRef,
+  keyboardActive = true,
 }: Props) {
   const activeRef = useRef<{ id: number; x: number; y: number } | null>(null);
   const pendingMoveRef = useRef<Point | null>(null);
@@ -106,6 +110,7 @@ export function DeviceStream({
     if (e.pointerType === "mouse" && e.button !== 0) return;
     if (activeRef.current) return;
     e.preventDefault();
+    keyboardProxyRef?.current?.focus({ preventScroll: true });
     updateAccessibilityHover(null);
     canvasRef.current?.setPointerCapture(e.pointerId);
     const p = norm(e);
@@ -164,6 +169,15 @@ export function DeviceStream({
         onPointerCancel={stopPointer}
         onContextMenu={(e) => e.preventDefault()}
       />
+      {!keyboardActive && (
+        <button
+          type="button"
+          className="keyboard-hint"
+          onClick={() => keyboardProxyRef?.current?.focus({ preventScroll: true })}
+        >
+          Click to resume keyboard input
+        </button>
+      )}
       {accessibilityEnabled && accessibilitySize && (
         <div className="ax-overlay" aria-hidden="true">
           {accessibilityNodes.map((node) => {

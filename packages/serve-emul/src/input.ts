@@ -34,7 +34,7 @@ export type Gesture =
   | { type: "tap"; x: number; y: number }
   | { type: "swipe"; x1: number; y1: number; x2: number; y2: number; durationMs?: number }
   | { type: "touch"; action: "down" | "move" | "up"; x: number; y: number; pointerId?: number }
-  | { type: "key"; keycode: number }
+  | { type: "key"; keycode: number; action?: "down" | "up"; metaState?: number }
   | { type: "text"; text: string }
   | { type: "back" }
   | { type: "home" }
@@ -86,6 +86,22 @@ function keycode(value: unknown): number {
   return n;
 }
 
+function optionalKeyAction(value: unknown): "down" | "up" | undefined {
+  if (value === undefined) return undefined;
+  if (value !== "down" && value !== "up") throw new Error("key action must be down or up");
+  return value;
+}
+
+// Android KeyEvent meta state bitmask (AMETA_*), e.g. shift/ctrl/alt combos.
+function optionalMetaState(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  const n = finiteNumber(value, "metaState");
+  if (!Number.isInteger(n) || n < 0 || n > 0x7fffffff) {
+    throw new Error("metaState must be a non-negative 32-bit integer");
+  }
+  return n;
+}
+
 function textBytes(text: string): Buffer {
   const out: string[] = [];
   let total = 0;
@@ -128,7 +144,12 @@ export function parseGesture(value: unknown): Gesture {
       };
     }
     case "key":
-      return { type: "key", keycode: keycode(value.keycode) };
+      return {
+        type: "key",
+        keycode: keycode(value.keycode),
+        action: optionalKeyAction(value.action),
+        metaState: optionalMetaState(value.metaState),
+      };
     case "text":
       if (typeof value.text !== "string") throw new Error("text must be a string");
       return { type: "text", text: value.text };
@@ -164,14 +185,14 @@ function touchPacket(
   return buf;
 }
 
-function keyPacket(action: number, keycode: number): Buffer {
+function keyPacket(action: number, keycode: number, metaState = 0): Buffer {
   const buf = Buffer.allocUnsafe(14);
   let o = 0;
   buf.writeUInt8(TYPE_INJECT_KEYCODE, o); o += 1;
   buf.writeUInt8(action, o); o += 1;
   buf.writeInt32BE(keycode, o); o += 4;
   buf.writeInt32BE(0, o); o += 4; // repeat
-  buf.writeInt32BE(0, o); o += 4; // meta state
+  buf.writeInt32BE(metaState, o); o += 4;
   return buf;
 }
 
@@ -231,8 +252,15 @@ export async function dispatch(control: Socket, g: Gesture, screen: Screen): Pro
       return;
     }
     case "key": {
-      control.write(keyPacket(ACTION_DOWN, g.keycode));
-      control.write(keyPacket(ACTION_UP, g.keycode));
+      const metaState = g.metaState ?? 0;
+      if (g.action === "down") {
+        control.write(keyPacket(ACTION_DOWN, g.keycode, metaState));
+      } else if (g.action === "up") {
+        control.write(keyPacket(ACTION_UP, g.keycode, metaState));
+      } else {
+        control.write(keyPacket(ACTION_DOWN, g.keycode, metaState));
+        control.write(keyPacket(ACTION_UP, g.keycode, metaState));
+      }
       return;
     }
     case "text":

@@ -118,6 +118,31 @@ canvas {
   inset: 0;
   pointer-events: none;
 }
+.keyboard-proxy {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: none;
+  opacity: 0;
+  pointer-events: none;
+}
+.keyboard-hint {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(0, 0, 0, 0.65);
+  color: #e5e5ea;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
 .ax-box {
   position: absolute;
   box-sizing: border-box;
