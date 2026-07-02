@@ -34,6 +34,7 @@ export type StartOpts = {
   bitRate?: number;
   maxSize?: number;
   keyFrameInterval?: number;
+  repeatFrameMs?: number;
 };
 
 export type VideoFrame = {
@@ -309,8 +310,17 @@ export async function startScrcpy(opts: StartOpts): Promise<ScrcpySession> {
   const { serial } = opts;
   const maxFps = opts.maxFps ?? 60;
   const bitRate = opts.bitRate ?? 8_000_000;
-  const maxSize = opts.maxSize ?? 0;
-  const keyFrameInterval = opts.keyFrameInterval ?? 1;
+  // The emulator has no hardware video encoder; its software H.264 encoder
+  // (c2.android.avc.encoder) only sustains 60fps below roughly a megapixel,
+  // so cap the longest edge at 1280 unless the caller overrides it.
+  const maxSize = opts.maxSize ?? 1280;
+  const keyFrameInterval = opts.keyFrameInterval ?? 10;
+  const repeatFrameMs = opts.repeatFrameMs ?? 0;
+  // MediaCodec option types matter: repeat-previous-frame-after is a long (µs).
+  const codecOptions = [
+    ...(keyFrameInterval > 0 ? [`i-frame-interval=${keyFrameInterval}`] : []),
+    ...(repeatFrameMs > 0 ? [`repeat-previous-frame-after:long=${Math.round(repeatFrameMs * 1000)}`] : []),
+  ];
   const scid = randomScid();
   let localPort: number | null = null;
   let proc: ChildProcess | null = null;
@@ -364,7 +374,7 @@ export async function startScrcpy(opts: StartOpts): Promise<ScrcpySession> {
         `max_size=${maxSize}`,
         `video_bit_rate=${bitRate}`,
         `max_fps=${maxFps}`,
-        ...(keyFrameInterval > 0 ? [`video_codec_options=i-frame-interval=${keyFrameInterval}`] : []),
+        ...(codecOptions.length > 0 ? [`video_codec_options=${codecOptions.join(",")}`] : []),
         "cleanup=true",
       ],
       { stdio: ["ignore", "pipe", "pipe"] },

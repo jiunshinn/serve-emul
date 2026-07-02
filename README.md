@@ -75,7 +75,7 @@ bun run packages/serve-emul/src/cli.ts
 ## CLI
 
 ```text
-serve-emul [-p <port>] [-s <serial>] [--max-fps N] [--bit-rate N] [--max-size N] [--key-frame-interval sec]
+serve-emul [-p <port>] [-s <serial>] [--max-fps N] [--bit-rate N] [--max-size N] [--key-frame-interval sec] [--repeat-frame-ms ms]
 serve-emul --avd <name> [--gpu <mode>] [--restart-avd]
 serve-emul --avd-list
 serve-emul --running-avds
@@ -87,8 +87,9 @@ serve-emul --running-avds
 | `-s, --serial` | auto | adb device serial; required when multiple devices are online |
 | `--max-fps` | `60` | Cap source frame rate |
 | `--bit-rate` | `8000000` | H.264 bit rate in bps |
-| `--max-size` | `1920` | Downscale the longest edge to N pixels; `0` keeps native size |
-| `--key-frame-interval` | `1` | Ask the encoder for regular keyframes; `0` disables this codec option |
+| `--max-size` | `1280` | Downscale the longest edge to N pixels; `0` keeps native size. The emulator's software H.264 encoder sustains 60fps only below ~1 megapixel, hence the 1280 default |
+| `--key-frame-interval` | `10` | Ask the encoder for regular keyframes; `0` disables this codec option. Late joiners get keyframes on demand, so a long interval avoids periodic keyframe bursts |
+| `--repeat-frame-ms` | `0` | Re-encode the previous frame after N ms without screen changes (`16` ≈ steady 60fps on static screens, at extra CPU/bandwidth cost); `0` keeps the encoder default of one repeat per 100ms |
 | `--avd` | none | Launch this Android Virtual Device before streaming |
 | `--gpu` | `host` | Emulator GPU mode for `--avd` launches. `host` renders on the real GPU for smooth ~60fps; see [Smooth Emulator Playback](#smooth-emulator-playback) |
 | `--restart-avd` | false | Stop a running matching AVD before launching it |
@@ -320,7 +321,7 @@ Connect to `/ws` for the raw Annex-B H.264 stream. Send JSON control messages ov
 {"type":"reset-video"}
 ```
 
-Use `/ws?frame-meta=1` to receive a 16-byte `SEMU` frame metadata header before each H.264 access unit. The bundled UI uses this mode to avoid per-frame NAL scans and to track PTS/keyframe state.
+Use `/ws?frame-meta=1` to receive a 24-byte `SEMU` v2 frame metadata header before each H.264 access unit: magic `SEMU` (4B), version=2 (1B), flags (1B, bit 0 = keyframe), reserved (2B), PTS (8B BE, µs), and the server send time (8B BE, epoch µs). Same-host clients can compare the send time against their own clock to measure transit and glass-to-glass latency. The bundled UI uses this mode to avoid per-frame NAL scans and to track PTS/keyframe/latency state.
 
 ## How It Works
 
@@ -336,7 +337,7 @@ Use `/ws?frame-meta=1` to receive a 16-byte `SEMU` frame metadata header before 
 1. The CLI pushes `scrcpy-server-v4.0` to `/data/local/tmp/scrcpy-server.jar`.
 2. It opens `adb forward tcp:<localPort> localabstract:scrcpy_<scid>`.
 3. It spawns `app_process` with the scrcpy server class on the device, then connects video and control sockets through the tunnel.
-4. The Bun server reads scrcpy's framed H.264 stream and forwards each access unit as a binary WebSocket message. Raw `/ws` clients receive Annex-B payloads unchanged; the built-in browser UI opts into the 16-byte frame metadata header.
+4. The Bun server reads scrcpy's framed H.264 stream and forwards each access unit as a binary WebSocket message. Raw `/ws` clients receive Annex-B payloads unchanged; the built-in browser UI opts into the 24-byte frame metadata header.
 5. The browser configures a `VideoDecoder` from SPS/PPS data and draws decoded frames to a `<canvas>`. Pointer events are normalized to unit coordinates and encoded as scrcpy control socket packets.
 
 ## Development

@@ -14,8 +14,9 @@ const { values } = parseArgs({
     serial: { type: "string", short: "s" },
     "max-fps": { type: "string", default: "60" },
     "bit-rate": { type: "string", default: "8000000" },
-    "max-size": { type: "string", default: "1920" },
-    "key-frame-interval": { type: "string", default: "1" },
+    "max-size": { type: "string", default: "1280" },
+    "key-frame-interval": { type: "string", default: "10" },
+    "repeat-frame-ms": { type: "string", default: "0" },
     avd: { type: "string" },
     "avd-list": { type: "boolean" },
     "running-avds": { type: "boolean" },
@@ -51,7 +52,7 @@ if (values.help) {
   console.log(`serve-emul — host an Android device over scrcpy + WebSocket
 
 Usage:
-  serve-emul [-p <port>] [-s <serial>] [--max-fps N] [--bit-rate N] [--max-size N] [--key-frame-interval sec]
+  serve-emul [-p <port>] [-s <serial>] [--max-fps N] [--bit-rate N] [--max-size N] [--key-frame-interval sec] [--repeat-frame-ms ms]
   serve-emul --avd <name> [--restart-avd]
   serve-emul --avd-list
   serve-emul --running-avds
@@ -61,12 +62,20 @@ Options:
   -s, --serial <serial>  adb device serial (defaults to the only booted device)
       --max-fps <n>      Cap source frame rate (default: 60)
       --bit-rate <bps>   H.264 bit rate (default: 8000000)
-      --max-size <px>    Cap longest screen edge in pixels; 0 = native, but many
-                         emulators reject native resolutions above ~2560 so this
-                         defaults to 1920.
+      --max-size <px>    Cap longest screen edge in pixels; 0 = native. The
+                         emulator only has a software H.264 encoder, which
+                         sustains 60fps only below ~1 megapixel, so this
+                         defaults to 1280.
       --key-frame-interval <sec>
                          Ask the encoder for regular keyframes; 0 disables this
-                         codec option (default: 1)
+                         codec option (default: 10). Late joiners get keyframes
+                         on demand via reset-video, so a long interval avoids
+                         periodic keyframe bursts.
+      --repeat-frame-ms <ms>
+                         Re-encode the previous frame after this many ms with no
+                         screen change, so static screens keep producing frames
+                         (16 ≈ steady 60fps at the cost of extra CPU/bandwidth;
+                         0 keeps the encoder default of one repeat per 100ms)
       --avd <name>       Launch this Android Virtual Device before streaming
       --gpu <mode>       Emulator GPU mode for --avd launches (default: host).
                          host uses the real GPU for smooth ~60fps; the AVD's
@@ -118,8 +127,9 @@ async function main() {
   const port = Number(values.port);
   const maxFps = numberOption("max-fps", 60);
   const bitRate = numberOption("bit-rate", 8_000_000);
-  const maxSize = numberOption("max-size", 1920);
-  const keyFrameInterval = numberOption("key-frame-interval", 1);
+  const maxSize = numberOption("max-size", 1280);
+  const keyFrameInterval = numberOption("key-frame-interval", 10);
+  const repeatFrameMs = numberOption("repeat-frame-ms", 0);
 
   const { server, stop: stopServer } = await startServer({
     serial,
@@ -128,6 +138,7 @@ async function main() {
     bitRate,
     maxSize,
     keyFrameInterval,
+    repeatFrameMs,
   }).catch((err) => {
     emulatorLaunch?.stop();
     throw err;
