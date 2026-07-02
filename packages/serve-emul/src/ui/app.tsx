@@ -133,7 +133,7 @@ export function App() {
 
   return (
     <>
-      <StatusBar status={state.status} deviceSize={state.deviceSize} fps={state.fps} />
+      <StatusBar status={state.status} deviceSize={state.deviceSize} fps={state.fps} stats={state.stats} />
       <main className={devicesOpen ? "app-layout devices-open" : "app-layout devices-collapsed"}>
         <aside className="device-sidebar" aria-label="Devices sidebar">
           <div className="device-sidebar-header">
